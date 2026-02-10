@@ -563,14 +563,33 @@ def _get_slice_thickness(datasets: list[pydicom.Dataset]) -> float:
     return 1.0
 
 
-def _load_single_file(file_path: Path) -> tuple[InputType, DicomVolume]:
-    """Load a single DICOM file."""
+def _load_single_file(
+    file_path: Path,
+) -> tuple[InputType, DicomVolume | TemporalSequence]:
+    """Load a single DICOM file.
+
+    If the file is multi-frame (e.g. ultrasound cine), it is unpacked
+    as a temporal sequence rather than treated as a single slice.
+    """
     ds = pydicom.dcmread(str(file_path))
+
+    # Multi-frame files get routed through the multiframe handler
+    if hasattr(ds, "NumberOfFrames") and int(ds.NumberOfFrames) > 1:
+        return _detect_multiframe([ds])  # type: ignore[return-value]
+
     pixel_array = ds.pixel_array.astype(np.float32)
 
     slope = getattr(ds, "RescaleSlope", 1.0)
     intercept = getattr(ds, "RescaleIntercept", 0.0)
     pixel_array = pixel_array * float(slope) + float(intercept)
+
+    # Convert RGB to grayscale if needed
+    if pixel_array.ndim == 3 and pixel_array.shape[-1] in (3, 4):
+        pixel_array = (
+            0.299 * pixel_array[..., 0]
+            + 0.587 * pixel_array[..., 1]
+            + 0.114 * pixel_array[..., 2]
+        )
 
     # Ensure 3D (add Z dimension for single slice)
     if pixel_array.ndim == 2:

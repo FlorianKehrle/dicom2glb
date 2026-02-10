@@ -435,18 +435,20 @@ def _convert_series(
 
         # Step 3: Convert
 
-        # Detect 2D temporal data (multi-frame ultrasound cine clips)
-        # and route to textured plane export since 3D methods can't handle it.
-        if input_type == InputType.TEMPORAL:
+        # Detect 2D temporal data (multi-frame ultrasound cine clips).
+        # Without --animate, export first frame as a static textured plane.
+        # With --animate, fall through to the animated pipeline.
+        if input_type == InputType.TEMPORAL and not animate:
             from dicom2glb.core.volume import TemporalSequence
             if isinstance(data, TemporalSequence) and data.frames[0].voxels.shape[0] == 1:
-                # 2D cine — export first frame as textured plane
+                # 2D cine without --animate — export first frame as textured plane
                 task = progress.add_task("Building textured plane from 2D echo...", total=None)
                 from dicom2glb.glb.texture import build_textured_plane_glb
 
                 console.print(
                     f"[yellow]2D ultrasound cine detected ({data.frame_count} frames). "
-                    f"Exporting first frame as textured plane.[/yellow]"
+                    f"Exporting first frame as textured plane. "
+                    f"Use --animate for animated output.[/yellow]"
                 )
                 build_textured_plane_glb(data.frames[0], output)
                 progress.remove_task(task)
@@ -478,6 +480,26 @@ def _convert_series(
             return
 
         if input_type == InputType.TEMPORAL and animate:
+            from dicom2glb.core.volume import TemporalSequence
+            if isinstance(data, TemporalSequence) and data.frames[0].voxels.shape[0] == 1:
+                # 2D cine + --animate → animated height-map textured plane
+                task = progress.add_task(
+                    f"Building animated surface from {data.frame_count} frames...", total=None
+                )
+                from dicom2glb.glb.texture import build_animated_textured_plane_glb
+
+                build_animated_textured_plane_glb(data, output)
+                progress.remove_task(task)
+
+                file_size = output.stat().st_size / 1024
+                elapsed = time.time() - start_time
+                console.print(f"\n[green]Conversion complete![/green]")
+                console.print(f"  Input:    2D echo cine ({data.frame_count} frames)")
+                console.print(f"  Output:   {output} (animated)")
+                console.print(f"  Size:     {file_size:.1f} KB")
+                console.print(f"  Time:     {elapsed:.1f}s")
+                return
+            # 3D temporal + --animate → standard morph target pipeline
             result = _run_animated_pipeline(data, converter, params, alpha, progress)
         else:
             if input_type == InputType.TEMPORAL:
