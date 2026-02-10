@@ -15,6 +15,7 @@ No existing end-to-end CLI tool converts DICOM directly to animated GLB for augm
 - **Automatic series detection** -- multi-series DICOM folders are analyzed and classified (3D volume, 2D cine, still image) with per-series conversion recommendations
 - **Interactive series selection** -- choose which series to convert from a Rich table, or let the tool auto-select the best one
 - **Multi-format export** -- GLB (with animation and PBR materials), STL, and OBJ
+- **Step-by-step progress** -- real-time progress reporting shows what processing step the method is on (e.g. "Smoothing volume... 1/5", "Running TotalSegmentator AI segmentation...")
 - **AR-optimized meshes** -- Taubin smoothing (volume-preserving), decimation to configurable triangle count, and configurable transparency
 - **Multi-threshold layered output** -- extract multiple structures at different intensity thresholds with per-layer colors and transparency
 

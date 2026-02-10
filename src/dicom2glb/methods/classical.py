@@ -12,7 +12,7 @@ from skimage.filters import threshold_otsu
 from dicom2glb.core.types import ConversionResult, MeshData, MethodParams
 from dicom2glb.core.volume import DicomVolume
 from dicom2glb.glb.materials import default_material
-from dicom2glb.methods.base import ConversionMethod
+from dicom2glb.methods.base import ConversionMethod, ProgressCallback
 from dicom2glb.methods.registry import register_method
 
 
@@ -26,18 +26,29 @@ class ClassicalMethod(ConversionMethod):
     )
     recommended_for = "3D echo data, noisy datasets."
 
-    def convert(self, volume: DicomVolume, params: MethodParams) -> ConversionResult:
+    def convert(
+        self,
+        volume: DicomVolume,
+        params: MethodParams,
+        progress: ProgressCallback | None = None,
+    ) -> ConversionResult:
         start = time.time()
         warnings = []
+
+        def _report(desc: str, current: int | None = None, total: int | None = None):
+            if progress is not None:
+                progress(desc, current, total)
 
         voxels = volume.voxels.copy()
         spacing = volume.spacing
 
         # Step 1: Gaussian volume smoothing to reduce noise
+        _report("Smoothing volume...", 1, 5)
         sigma = _compute_sigma(spacing)
         voxels = ndimage.gaussian_filter(voxels, sigma=sigma)
 
         # Step 2: Threshold
+        _report("Computing threshold...", 2, 5)
         threshold = params.threshold
         if threshold is None:
             threshold = _adaptive_threshold(voxels)
@@ -46,9 +57,11 @@ class ClassicalMethod(ConversionMethod):
         binary = voxels >= threshold
 
         # Step 3: Morphological operations to clean up
+        _report("Morphological cleanup...", 3, 5)
         binary = _morphological_cleanup(binary)
 
         # Step 4: Keep only largest connected component
+        _report("Finding largest component...", 4, 5)
         binary = _keep_largest_component(binary)
 
         if not binary.any():
@@ -59,6 +72,7 @@ class ClassicalMethod(ConversionMethod):
 
         # Step 5: Marching cubes on cleaned binary volume
         # Use smoothed voxels for better surface quality
+        _report("Extracting surface...", 5, 5)
         try:
             verts, faces, normals, _ = measure.marching_cubes(
                 voxels, level=threshold, spacing=spacing

@@ -10,7 +10,7 @@ import numpy as np
 from dicom2glb.core.types import ConversionResult, MeshData, MethodParams
 from dicom2glb.core.volume import DicomVolume
 from dicom2glb.glb.materials import get_cardiac_material
-from dicom2glb.methods.base import ConversionMethod
+from dicom2glb.methods.base import ConversionMethod, ProgressCallback
 from dicom2glb.methods.registry import register_method
 
 logger = logging.getLogger(__name__)
@@ -32,9 +32,18 @@ class MedSAM2Method(ConversionMethod):
         except ImportError:
             return False, "Install with: pip install dicom2glb[ai]"
 
-    def convert(self, volume: DicomVolume, params: MethodParams) -> ConversionResult:
+    def convert(
+        self,
+        volume: DicomVolume,
+        params: MethodParams,
+        progress: ProgressCallback | None = None,
+    ) -> ConversionResult:
         start = time.time()
         warnings = []
+
+        def _report(desc: str, current: int | None = None, total: int | None = None):
+            if progress is not None:
+                progress(desc, current, total)
 
         available, msg = self.check_dependencies()
         if not available:
@@ -43,6 +52,7 @@ class MedSAM2Method(ConversionMethod):
             )
 
         # MedSAM2 segmentation pipeline
+        _report("Running MedSAM2 AI segmentation...")
         try:
             masks = _run_medsam2_segmentation(volume)
         except Exception as e:
@@ -56,8 +66,10 @@ class MedSAM2Method(ConversionMethod):
 
         meshes = []
         spacing = volume.spacing
+        total_structures = len(masks)
 
-        for structure_name, mask in masks.items():
+        for i, (structure_name, mask) in enumerate(masks.items(), 1):
+            _report(f"Extracting {structure_name}...", i, total_structures)
             if not mask.any():
                 continue
 

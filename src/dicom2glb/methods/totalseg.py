@@ -9,7 +9,7 @@ import numpy as np
 from dicom2glb.core.types import ConversionResult, MeshData, MethodParams
 from dicom2glb.core.volume import DicomVolume
 from dicom2glb.glb.materials import get_cardiac_material
-from dicom2glb.methods.base import ConversionMethod
+from dicom2glb.methods.base import ConversionMethod, ProgressCallback
 from dicom2glb.methods.registry import register_method
 
 # Mapping from TotalSegmentator labels to our cardiac structure names
@@ -40,8 +40,17 @@ class TotalSegmentatorMethod(ConversionMethod):
         except ImportError:
             return False, "Install with: pip install dicom2glb[ai]"
 
-    def convert(self, volume: DicomVolume, params: MethodParams) -> ConversionResult:
+    def convert(
+        self,
+        volume: DicomVolume,
+        params: MethodParams,
+        progress: ProgressCallback | None = None,
+    ) -> ConversionResult:
         start = time.time()
+
+        def _report(desc: str, current: int | None = None, total: int | None = None):
+            if progress is not None:
+                progress(desc, current, total)
 
         try:
             from totalsegmentator.python_api import totalsegmentator
@@ -56,6 +65,7 @@ class TotalSegmentatorMethod(ConversionMethod):
         warnings = []
 
         # Convert DicomVolume to nibabel nifti for TotalSegmentator
+        _report("Preparing volume for TotalSegmentator...")
         affine = _build_affine(volume)
         nifti_img = nib.Nifti1Image(
             volume.voxels.transpose(2, 1, 0),  # [X, Y, Z] for nifti
@@ -63,6 +73,7 @@ class TotalSegmentatorMethod(ConversionMethod):
         )
 
         # Run TotalSegmentator with cardiac task
+        _report("Running TotalSegmentator AI segmentation...")
         segmentation = totalsegmentator(
             nifti_img,
             task="total",
@@ -74,8 +85,12 @@ class TotalSegmentatorMethod(ConversionMethod):
         # Extract meshes for each cardiac structure
         meshes = []
         spacing = volume.spacing
+        total_structures = len(TOTALSEG_CARDIAC_LABELS)
 
-        for label_name, structure_name in TOTALSEG_CARDIAC_LABELS.items():
+        for i, (label_name, structure_name) in enumerate(
+            TOTALSEG_CARDIAC_LABELS.items(), 1
+        ):
+            _report(f"Extracting {structure_name}...", i, total_structures)
             # Find the label index — TotalSegmentator uses integer labels
             # We need to check if this structure was segmented
             mask = _get_structure_mask(seg_data, label_name)
