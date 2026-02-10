@@ -11,7 +11,7 @@ from skimage import measure
 from dicom2glb.core.types import ConversionResult, MaterialConfig, MeshData, MethodParams
 from dicom2glb.core.volume import DicomVolume
 from dicom2glb.glb.materials import default_material
-from dicom2glb.methods.base import ConversionMethod
+from dicom2glb.methods.base import ConversionMethod, ProgressCallback
 from dicom2glb.methods.registry import register_method
 
 
@@ -22,10 +22,20 @@ class MarchingCubesMethod(ConversionMethod):
     description = "Basic isosurface extraction at configurable threshold."
     recommended_for = "Quick preview of any modality."
 
-    def convert(self, volume: DicomVolume, params: MethodParams) -> ConversionResult:
+    def convert(
+        self,
+        volume: DicomVolume,
+        params: MethodParams,
+        progress: ProgressCallback | None = None,
+    ) -> ConversionResult:
         start = time.time()
         warnings = []
 
+        def _report(desc: str, current: int | None = None, total: int | None = None):
+            if progress is not None:
+                progress(desc, current, total)
+
+        _report("Computing threshold...", 1, 2)
         threshold = params.threshold
         if threshold is None:
             threshold = _auto_threshold(volume.voxels)
@@ -36,6 +46,7 @@ class MarchingCubesMethod(ConversionMethod):
             return _multi_threshold_extract(volume, params, start)
 
         # Run marching cubes
+        _report("Running marching cubes...", 2, 2)
         voxels = volume.voxels
         spacing = volume.spacing
 

@@ -3,9 +3,19 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 
 from dicom2glb.core.types import ConversionResult, MethodParams
 from dicom2glb.core.volume import DicomVolume
+
+ProgressCallback = Callable[[str, int | None, int | None], None]
+"""Callback for reporting conversion progress.
+
+Args:
+    description: Human-readable step description.
+    current: Current step number (None for indeterminate).
+    total: Total number of steps (None for indeterminate).
+"""
 
 
 class ConversionMethod(ABC):
@@ -17,7 +27,12 @@ class ConversionMethod(ABC):
     requires_ai: bool = False
 
     @abstractmethod
-    def convert(self, volume: DicomVolume, params: MethodParams) -> ConversionResult:
+    def convert(
+        self,
+        volume: DicomVolume,
+        params: MethodParams,
+        progress: ProgressCallback | None = None,
+    ) -> ConversionResult:
         """Convert a DICOM volume to mesh data."""
         ...
 

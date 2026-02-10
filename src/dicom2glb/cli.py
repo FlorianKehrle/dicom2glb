@@ -9,7 +9,7 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn
 from rich.prompt import Prompt
 from rich.table import Table
 
@@ -512,7 +512,14 @@ def _convert_series(
                     )
 
             task = progress.add_task(f"Converting with {method_name}...", total=None)
-            result = converter.convert(data, params)
+
+            def on_progress(desc, current=None, total=None):
+                if total is not None:
+                    progress.update(task, description=desc, completed=current, total=total)
+                else:
+                    progress.update(task, description=desc)
+
+            result = converter.convert(data, params, progress=on_progress)
             progress.remove_task(task)
 
             # Apply alpha override
@@ -580,6 +587,7 @@ def _run_animated_pipeline(data, converter, params, alpha, progress):
     # Convert each frame
     frame_results = []
     for i, frame in enumerate(data.frames):
+        progress.update(task, description=f"Converting frame {i + 1}/{data.frame_count}...")
         result = converter.convert(frame, params)
         processed = []
         for mesh in result.meshes:
