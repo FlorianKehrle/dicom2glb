@@ -2,7 +2,21 @@
 
 Convert DICOM medical imaging data to GLB 3D models optimized for AR viewing.
 
-Supports 3D echocardiography, cardiac CT/MRI, and single DICOM slices. Outputs GLB files with PBR materials, morph target animation for cardiac cycles, and multi-structure segmentation with per-structure coloring.
+Supports 3D echocardiography, cardiac CT/MRI, 2D cine clips, and single DICOM slices. Outputs GLB files with PBR materials, morph target animation for cardiac cycles, and multi-structure segmentation with per-structure coloring.
+
+## Description
+
+No existing end-to-end CLI tool converts DICOM directly to animated GLB for augmented reality. Existing tools (3D Slicer, DicomToMesh, InVesalius) produce static STL/OBJ via a GUI. dicom2glb fills this gap as a single command that takes DICOM data in and produces AR-ready GLB out.
+
+**Key features:**
+
+- **Animated cardiac output** -- 3D echo and 2D cine data become looping GLB animations using morph targets, playable in any glTF viewer
+- **Pluggable conversion methods** -- classical (Gaussian + adaptive threshold), marching cubes, TotalSegmentator (CT), and MedSAM2 (echo/general)
+- **Automatic series detection** -- multi-series DICOM folders are analyzed and classified (3D volume, 2D cine, still image) with per-series conversion recommendations
+- **Interactive series selection** -- choose which series to convert from a Rich table, or let the tool auto-select the best one
+- **Multi-format export** -- GLB (with animation and PBR materials), STL, and OBJ
+- **AR-optimized meshes** -- Taubin smoothing (volume-preserving), decimation to configurable triangle count, and configurable transparency
+- **Multi-threshold layered output** -- extract multiple structures at different intensity thresholds with per-layer colors and transparency
 
 ## Installation
 
