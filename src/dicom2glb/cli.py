@@ -315,16 +315,14 @@ def _print_series_table(series_list: list[SeriesInfo], input_path: Path) -> None
     table = Table(title=f"DICOM Series in {input_path}")
     table.add_column("#", style="bold", justify="right")
     table.add_column("Modality", style="green")
-    table.add_column("Description")
+    table.add_column("Description", max_width=40)
     table.add_column("Data Type", style="cyan")
     table.add_column("Detail", justify="right")
-    table.add_column("Recommended", style="yellow")
+    table.add_column("Recommended Output", style="yellow")
+    table.add_column("Recommended Method", style="magenta")
 
     for i, info in enumerate(series_list, 1):
         desc = info.description if info.description else "(no desc)"
-        # Truncate long descriptions
-        if len(desc) > 20:
-            desc = desc[:17] + "..."
         table.add_row(
             str(i),
             info.modality,
@@ -332,6 +330,7 @@ def _print_series_table(series_list: list[SeriesInfo], input_path: Path) -> None
             info.data_type,
             info.detail,
             info.recommended_output,
+            info.recommended_method,
         )
 
     console.print(table)
@@ -339,7 +338,8 @@ def _print_series_table(series_list: list[SeriesInfo], input_path: Path) -> None
     # Print recommendation
     best = series_list[0]
     console.print(
-        f"\nRecommendation: Series 1 ({best.data_type}, {best.detail})"
+        f"\nRecommendation: Series 1 ({best.data_type}, {best.detail}) "
+        f"→ [magenta]{best.recommended_method}[/magenta]"
     )
 
 
