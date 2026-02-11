@@ -136,8 +136,8 @@ class TestBuildSpatialGlb:
         for node in gltf.nodes:
             assert node.matrix is not None
 
-    def test_falls_back_without_positions(self, tmp_path):
-        """Without position metadata, should fall back to lightbox grid."""
+    def test_skips_without_positions(self, tmp_path):
+        """Without position metadata, should skip and return False."""
         slices = [
             GallerySlice(
                 pixel_data=np.zeros((32, 32), dtype=np.float32),
@@ -154,13 +154,10 @@ class TestBuildSpatialGlb:
             )
             for i in range(4)
         ]
-        out = tmp_path / "spatial_fallback.glb"
-        build_spatial_glb(slices, out, animate=False)
-        assert out.exists()
-        gltf = pygltflib.GLTF2.load(str(out))
-        # Should have nodes with translations (lightbox grid), not matrices
-        for node in gltf.nodes:
-            assert node.translation is not None
+        out = tmp_path / "spatial_skip.glb"
+        result = build_spatial_glb(slices, out, animate=False)
+        assert result is False
+        assert not out.exists()
 
     def test_animated(self, dicom_temporal_gallery_directory, tmp_path):
         """Spatial animated GLB should have animation channels."""

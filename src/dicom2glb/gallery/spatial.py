@@ -29,22 +29,18 @@ def build_spatial_glb(
     output_path: Path,
     animate: bool = True,
     temporal_resolution: float | None = None,
-) -> None:
+) -> bool:
     """Build a GLB with quads at their real-world spatial positions.
 
-    Falls back to lightbox grid if no position metadata is available.
+    Returns True if the file was created, False if skipped (no spatial metadata).
     """
     if not slices:
-        return
+        return False
 
     has_positions = any(s.image_position is not None for s in slices)
     if not has_positions:
-        logger.warning("No spatial metadata — falling back to lightbox grid layout.")
-        from dicom2glb.gallery.lightbox import build_lightbox_glb
-
-        build_lightbox_glb(slices, output_path, animate=animate,
-                           temporal_resolution=temporal_resolution)
-        return
+        logger.info("Skipping spatial output — no ImagePositionPatient metadata available.")
+        return False
 
     has_temporal = any(s.temporal_index is not None for s in slices)
 
@@ -62,6 +58,7 @@ def build_spatial_glb(
         _build_static_spatial(gltf, binary_data, slices, geom)
 
     finalize_gltf(gltf, binary_data, output_path)
+    return True
 
 
 def _build_static_spatial(

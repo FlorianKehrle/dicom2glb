@@ -673,7 +673,7 @@ def _run_gallery_mode(
         # Step 4: Spatial fan GLB
         spatial_path = output_dir / f"{series_name}_spatial.glb"
         task = progress.add_task("Building spatial fan...", total=None)
-        build_spatial_glb(
+        spatial_created = build_spatial_glb(
             slices, spatial_path, animate=animate,
         )
         progress.remove_task(task)
@@ -685,7 +685,10 @@ def _run_gallery_mode(
     console.print(f"  Animated:   {'Yes' if animate else 'No'}")
     console.print(f"  Individual: {series_dir}/ ({len(individual_paths)} files)")
     console.print(f"  Lightbox:   {lightbox_path}")
-    console.print(f"  Spatial:    {spatial_path}")
+    if spatial_created:
+        console.print(f"  Spatial:    {spatial_path}")
+    else:
+        console.print(f"  Spatial:    [dim]skipped (no spatial metadata)[/dim]")
     console.print(f"  Time:       {elapsed:.1f}s")
 
 
