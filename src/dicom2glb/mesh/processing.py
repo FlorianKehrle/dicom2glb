@@ -73,6 +73,53 @@ def fill_holes(mesh: MeshData) -> MeshData:
     )
 
 
+def remove_degenerate(mesh: MeshData) -> MeshData:
+    """Remove needle-like faces and disconnected fragments.
+
+    1. Drop faces whose longest edge is >10x the median edge length
+       (these create visible spikes from disconnected segmentation blobs).
+    2. Keep only the largest connected component to discard small fragments.
+    """
+    tri = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, process=False)
+
+    if len(tri.faces) == 0:
+        return mesh
+
+    # --- Remove faces with extremely long edges ---
+    v0 = tri.vertices[tri.faces[:, 0]]
+    v1 = tri.vertices[tri.faces[:, 1]]
+    v2 = tri.vertices[tri.faces[:, 2]]
+    e0 = np.linalg.norm(v1 - v0, axis=1)
+    e1 = np.linalg.norm(v2 - v1, axis=1)
+    e2 = np.linalg.norm(v0 - v2, axis=1)
+    max_edge = np.maximum(e0, np.maximum(e1, e2))
+    median_edge = np.median(max_edge)
+
+    if median_edge > 0:
+        keep_mask = max_edge < median_edge * 10
+        if keep_mask.sum() < len(tri.faces):
+            tri.update_faces(keep_mask)
+            tri.remove_unreferenced_vertices()
+
+    # --- Keep largest connected component ---
+    if len(tri.faces) > 0:
+        components = trimesh.graph.connected_components(tri.face_adjacency, min_len=1)
+        if len(components) > 1:
+            largest = max(components, key=len)
+            mask = np.zeros(len(tri.faces), dtype=bool)
+            mask[largest] = True
+            tri.update_faces(mask)
+            tri.remove_unreferenced_vertices()
+
+    return MeshData(
+        vertices=np.array(tri.vertices, dtype=np.float32),
+        faces=np.array(tri.faces, dtype=np.int32),
+        normals=None,
+        structure_name=mesh.structure_name,
+        material=mesh.material,
+    )
+
+
 def compute_normals(mesh: MeshData) -> MeshData:
     """Recalculate vertex normals."""
     tri = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, process=False)
@@ -93,9 +140,10 @@ def process_mesh(
     target_faces: int = 80000,
     do_fill_holes: bool = True,
 ) -> MeshData:
-    """Full mesh processing pipeline: smooth -> decimate -> fill holes -> normals."""
+    """Full mesh processing pipeline: smooth -> decimate -> cleanup -> fill holes -> normals."""
     result = taubin_smooth(mesh, iterations=smoothing_iterations)
     result = decimate(result, target_faces=target_faces)
+    result = remove_degenerate(result)
     if do_fill_holes:
         result = fill_holes(result)
     result = compute_normals(result)
