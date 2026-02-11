@@ -94,6 +94,17 @@ def list_series(input_path: Path) -> list[dict]:
     return result
 
 
+def scan_and_group(input_path: Path) -> dict[str, list[pydicom.Dataset]]:
+    """Scan directory and group DICOM files by series UID. No filtering."""
+    input_path = Path(input_path)
+    if not input_path.is_dir():
+        raise ValueError(f"Not a directory: {input_path}")
+    dcm_files = _scan_dicom_files(input_path)
+    if not dcm_files:
+        raise ValueError(f"No valid DICOM files found in {input_path}")
+    return _group_by_series(dcm_files)
+
+
 def analyze_series(input_path: Path) -> list[SeriesInfo]:
     """Analyze all DICOM series in a directory with classification and recommendations.
 

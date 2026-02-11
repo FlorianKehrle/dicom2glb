@@ -192,6 +192,44 @@ def _add_mesh_to_gltf(
     return node_idx
 
 
+def write_accessor(
+    gltf: pygltflib.GLTF2,
+    binary_data: bytearray,
+    data_array: np.ndarray,
+    target: int | None,
+    comp_type: int,
+    acc_type: str,
+    with_minmax: bool = False,
+) -> int:
+    """Write array data as a bufferView + accessor. Returns accessor index."""
+    raw = data_array.tobytes()
+    off = len(binary_data)
+    binary_data.extend(raw)
+    _pad_to_4(binary_data)
+    bv_idx = len(gltf.bufferViews)
+    bv_kwargs: dict = dict(buffer=0, byteOffset=off, byteLength=len(raw))
+    if target is not None:
+        bv_kwargs["target"] = target
+    gltf.bufferViews.append(pygltflib.BufferView(**bv_kwargs))
+    acc_idx = len(gltf.accessors)
+    kwargs: dict = dict(
+        bufferView=bv_idx,
+        componentType=comp_type,
+        count=len(data_array),
+        type=acc_type,
+    )
+    if with_minmax:
+        mx = data_array.max(axis=0).tolist()
+        mn = data_array.min(axis=0).tolist()
+        if not isinstance(mx, list):
+            mx = [mx]
+            mn = [mn]
+        kwargs["max"] = mx
+        kwargs["min"] = mn
+    gltf.accessors.append(pygltflib.Accessor(**kwargs))
+    return acc_idx
+
+
 def _pad_to_4(data: bytearray) -> None:
     """Pad binary data to 4-byte alignment."""
     remainder = len(data) % 4

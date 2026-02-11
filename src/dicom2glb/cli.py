@@ -132,6 +132,21 @@ def main(
         is_eager=True,
         help="List available conversion methods and exit.",
     ),
+    gallery: bool = typer.Option(
+        False,
+        "--gallery",
+        help="Gallery mode: individual GLBs, lightbox grid, and spatial fan.",
+    ),
+    columns: int = typer.Option(
+        6,
+        "--columns",
+        help="Number of columns in the lightbox grid (gallery mode).",
+    ),
+    no_animate: bool = typer.Option(
+        False,
+        "--no-animate",
+        help="Force static output even if temporal data is detected.",
+    ),
     do_list_series: bool = typer.Option(
         False,
         "--list-series",
@@ -168,21 +183,31 @@ def main(
         raise typer.Exit()
 
     try:
-        _run_pipeline(
-            input_path=input_path,
-            output=output,
-            method_name=method,
-            method_explicit=method_explicit,
-            format=format,
-            animate=animate,
-            threshold=threshold,
-            smoothing=smoothing,
-            target_faces=faces,
-            alpha=alpha,
-            multi_threshold=multi_threshold,
-            series=series,
-            verbose=verbose,
-        )
+        if gallery:
+            _run_gallery_mode(
+                input_path=input_path,
+                output=output,
+                series=series,
+                columns=columns,
+                no_animate=no_animate,
+                verbose=verbose,
+            )
+        else:
+            _run_pipeline(
+                input_path=input_path,
+                output=output,
+                method_name=method,
+                method_explicit=method_explicit,
+                format=format,
+                animate=animate,
+                threshold=threshold,
+                smoothing=smoothing,
+                target_faces=faces,
+                alpha=alpha,
+                multi_threshold=multi_threshold,
+                series=series,
+                verbose=verbose,
+            )
     except ValueError as e:
         err_console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(code=1)
@@ -348,8 +373,9 @@ def _print_series_table(series_list: list[SeriesInfo], input_path: Path) -> None
 
 def _interactive_select_series(series_list: list[SeriesInfo]) -> list[SeriesInfo]:
     """Prompt user to select series interactively. Returns selected SeriesInfo list."""
+    n = len(series_list)
     choice = Prompt.ask(
-        "Select series to convert",
+        f"Enter number (1-{n}), comma-separated (1,3), or 'all'",
         default="1",
         console=console,
     )
@@ -571,6 +597,104 @@ def _convert_series(
 
     for w in result.warnings:
         err_console.print(f"[yellow]Warning: {w}[/yellow]")
+
+
+def _run_gallery_mode(
+    input_path: Path,
+    output: Path,
+    series: str | None,
+    columns: int,
+    no_animate: bool,
+    verbose: bool,
+) -> None:
+    """Execute gallery mode: individual GLBs, lightbox grid, and spatial fan."""
+    from dicom2glb.gallery import (
+        build_individual_glbs,
+        build_lightbox_glb,
+        build_spatial_glb,
+        load_all_slices,
+    )
+    from dicom2glb.io.dicom_reader import analyze_series
+
+    start_time = time.time()
+
+    # Series selection
+    series_uid = series
+    if not series_uid and input_path.is_dir():
+        series_list = analyze_series(input_path)
+        if len(series_list) > 1 and sys.stdin.isatty():
+            _print_series_table(series_list, input_path)
+            selected = _interactive_select_series(series_list)
+            series_uid = selected[0].series_uid
+        else:
+            series_uid = series_list[0].series_uid
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        # Step 1: Load all slices
+        task = progress.add_task("Loading all DICOM slices...", total=None)
+        slices = load_all_slices(input_path, series_uid=series_uid)
+        progress.update(task, description=f"Loaded {len(slices)} slices")
+        progress.remove_task(task)
+
+        if not slices:
+            raise ValueError("No slices loaded for gallery mode.")
+
+        # Auto-detect temporal data
+        has_temporal = any(s.temporal_index is not None for s in slices)
+        animate = has_temporal and not no_animate
+
+        # Determine series name for output directory
+        desc = slices[0].modality
+        # Use output path as base directory
+        output_dir = Path(output) if output.suffix == "" else output.parent
+        series_name = _sanitize_name(desc)
+        series_dir = output_dir / series_name
+
+        # Step 2: Individual GLBs
+        task = progress.add_task("Building individual GLBs...", total=None)
+        individual_paths = build_individual_glbs(
+            slices, series_dir, animate=animate,
+        )
+        progress.update(task, description=f"Built {len(individual_paths)} individual GLBs")
+        progress.remove_task(task)
+
+        # Step 3: Lightbox GLB
+        lightbox_path = output_dir / f"{series_name}_lightbox.glb"
+        task = progress.add_task("Building lightbox grid...", total=None)
+        build_lightbox_glb(
+            slices, lightbox_path, columns=columns, animate=animate,
+        )
+        progress.remove_task(task)
+
+        # Step 4: Spatial fan GLB
+        spatial_path = output_dir / f"{series_name}_spatial.glb"
+        task = progress.add_task("Building spatial fan...", total=None)
+        build_spatial_glb(
+            slices, spatial_path, animate=animate,
+        )
+        progress.remove_task(task)
+
+    # Summary
+    elapsed = time.time() - start_time
+    console.print(f"\n[green]Gallery mode complete![/green]")
+    console.print(f"  Slices:     {len(slices)}")
+    console.print(f"  Animated:   {'Yes' if animate else 'No'}")
+    console.print(f"  Individual: {series_dir}/ ({len(individual_paths)} files)")
+    console.print(f"  Lightbox:   {lightbox_path}")
+    console.print(f"  Spatial:    {spatial_path}")
+    console.print(f"  Time:       {elapsed:.1f}s")
+
+
+def _sanitize_name(name: str) -> str:
+    """Sanitize a string for use as a directory/file name."""
+    import re
+    clean = re.sub(r"[^\w\s-]", "", name).strip()
+    clean = re.sub(r"[\s]+", "_", clean)
+    return clean or "series"
 
 
 def _run_animated_pipeline(data, converter, params, alpha, progress):

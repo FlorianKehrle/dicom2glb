@@ -91,3 +91,20 @@ class AnimatedResult:
     def meshes(self) -> list[MeshData]:
         """Alias for base_meshes for compatibility with ConversionResult."""
         return self.base_meshes
+
+
+@dataclass
+class GallerySlice:
+    """Single DICOM slice with metadata for gallery mode (no shape filtering)."""
+
+    pixel_data: np.ndarray  # [Y, X] or [Y, X, 3], uint8-ready
+    pixel_spacing: tuple[float, float]
+    image_position: tuple[float, float, float] | None
+    image_orientation: tuple[float, ...] | None  # 6 direction cosines
+    instance_number: int
+    filename: str
+    rows: int
+    cols: int
+    temporal_index: int | None
+    series_uid: str
+    modality: str

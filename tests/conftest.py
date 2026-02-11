@@ -255,6 +255,62 @@ def dicom_multi_series_with_multiframe_directory(tmp_path) -> Path:
     return tmp_path
 
 
+@pytest.fixture
+def dicom_gallery_mixed_directory(tmp_path) -> Path:
+    """Create a directory with mixed-dimension DICOM files for gallery mode testing.
+
+    4 slices at 32x32 + 2 at 64x64, all in the same series.
+    """
+    series_uid = generate_uid()
+
+    # 4 slices at 32x32
+    for i in range(4):
+        _write_synthetic_dicom(
+            tmp_path / f"small_{i:03d}.dcm",
+            series_uid=series_uid,
+            instance_number=i + 1,
+            slice_location=float(i),
+            rows=32,
+            cols=32,
+        )
+
+    # 2 slices at 64x64
+    for i in range(2):
+        _write_synthetic_dicom(
+            tmp_path / f"large_{i:03d}.dcm",
+            series_uid=series_uid,
+            instance_number=10 + i,
+            slice_location=float(10 + i),
+            rows=64,
+            cols=64,
+        )
+
+    return tmp_path
+
+
+@pytest.fixture
+def dicom_temporal_gallery_directory(tmp_path) -> Path:
+    """Create a directory with temporal DICOM files for gallery animation testing.
+
+    3 spatial positions x 2 temporal frames = 6 files.
+    """
+    series_uid = generate_uid()
+
+    for pos_idx in range(3):
+        for t_idx in range(2):
+            _write_synthetic_dicom(
+                tmp_path / f"pos{pos_idx}_t{t_idx}.dcm",
+                series_uid=series_uid,
+                instance_number=pos_idx * 10 + t_idx + 1,
+                slice_location=float(pos_idx),
+                temporal_position=t_idx + 1,
+                rows=32,
+                cols=32,
+            )
+
+    return tmp_path
+
+
 def _write_synthetic_multiframe_dicom(
     path: Path,
     series_uid: str,

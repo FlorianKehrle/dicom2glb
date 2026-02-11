@@ -503,3 +503,7 @@ def _pixel_data_to_png(pixel_data: np.ndarray) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+# Public alias for use by gallery modules
+pixel_data_to_png = _pixel_data_to_png
