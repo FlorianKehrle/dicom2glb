@@ -639,7 +639,13 @@ def _enforce_size_limit(
     strategy: str,
     progress: Progress,
 ) -> None:
-    """Compress a GLB file if it exceeds the size limit."""
+    """Compress a GLB file if it exceeds the size limit.
+
+    Keeps the original file and writes the compressed version with a
+    ``_compressed`` suffix so the user can compare quality.
+    """
+    import shutil
+
     max_bytes = max_size_mb * 1024 * 1024
     if not path.exists() or path.stat().st_size <= max_bytes:
         return
@@ -651,9 +657,13 @@ def _enforce_size_limit(
         f"Compressing GLB ({original_kb:.0f} KB > {max_size_mb} MB limit)...",
         total=None,
     )
-    constrain_glb_size(path, max_bytes, strategy=strategy)
-    new_kb = path.stat().st_size / 1024
-    progress.update(task, description=f"Compressed: {original_kb:.0f} KB → {new_kb:.0f} KB")
+
+    compressed_path = path.with_stem(path.stem + "_compressed")
+    shutil.copy2(str(path), str(compressed_path))
+    constrain_glb_size(compressed_path, max_bytes, strategy=strategy)
+
+    new_kb = compressed_path.stat().st_size / 1024
+    progress.update(task, description=f"Compressed: {original_kb:.0f} KB → {new_kb:.0f} KB ({compressed_path.name})")
     progress.remove_task(task)
 
 
