@@ -43,20 +43,19 @@ pip install -e ".[dev]"
 ## Quick Start
 
 ```bash
-# Convert a DICOM directory to GLB (3D mesh) → dicom_folder.glb
-dicom2glb ./dicom_folder/
+# Convert a DICOM directory — output placed next to input with auto-detected type
+dicom2glb ./echo_folder/        # → ./echo_folder_Echo_3D_animated.glb
+dicom2glb ./ct_scan/            # → ./ct_scan_CT_3D.glb
+dicom2glb image.dcm             # → ./image_Echo_2D.glb
 
 # Explicit output name
 dicom2glb ./echo_folder/ -o heart.glb
 
-# Output to a directory — filename derived from input → output/echo_folder.glb
-dicom2glb ./echo_folder/ -o output/
+# Output to a directory — filename derived from input
+dicom2glb ./echo_folder/ -o output/   # → output/echo_folder_Echo_3D_animated.glb
 
 # Animated 3D echo (cardiac cycle with morph targets)
 dicom2glb ./echo_folder/ -o heart.glb --animate
-
-# Single DICOM image to textured plane → image.glb
-dicom2glb image.dcm
 
 # Gallery mode: individual GLBs + lightbox grid + spatial fan
 dicom2glb ./dicom_folder/ --gallery
@@ -267,7 +266,7 @@ Arguments:
   INPUT_PATH              Path to DICOM file or directory
 
 Options:
-  -o, --output PATH       Output file path (default: <input_name>.glb)
+  -o, --output PATH       Output file path (default: <input>_<modality>_<type>.glb next to input)
   -m, --method TEXT        Conversion method: classical, marching-cubes, totalseg, medsam2
   -f, --format TEXT        Output format: glb, stl, obj (default: glb)
   --animate               Enable animation for temporal data

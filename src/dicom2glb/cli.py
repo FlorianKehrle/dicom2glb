@@ -194,14 +194,20 @@ def main(
 
     # Derive output path from input name when not fully specified
     stem = input_path.stem if input_path.is_file() else input_path.name
-    if output is None:
-        if gallery:
-            output = Path(stem)
+    parent = input_path.parent if input_path.is_file() else input_path.parent
+    if output is None or (not gallery and output.suffix == ""):
+        label = _get_data_type_label(input_path, series)
+        auto_stem = f"{stem}_{label}" if label else stem
+        if output is None:
+            if gallery:
+                # Gallery: directory as sibling to input
+                output = parent / auto_stem
+            else:
+                # Place GLB as sibling to input folder/file
+                output = parent / f"{auto_stem}.{format}"
         else:
-            output = Path(f"{stem}.{format}")
-    elif not gallery and output.suffix == "":
-        # -o points to a directory — put <input_name>.<format> inside it
-        output = output / f"{stem}.{format}"
+            # -o points to a directory — put <input_name>_<type>.<format> inside it
+            output = output / f"{auto_stem}.{format}"
 
     try:
         if gallery:
@@ -832,6 +838,55 @@ def _sanitize_name(name: str) -> str:
     clean = re.sub(r"[^\w\s-]", "", name).strip()
     clean = re.sub(r"[\s]+", "_", clean)
     return clean or "series"
+
+
+def _data_type_label(modality: str, data_type: str) -> str:
+    """Create a physician-friendly label from modality and data type."""
+    modality_names = {
+        "US": "Echo",
+        "MR": "MRI",
+        "CT": "CT",
+        "XA": "Angio",
+        "NM": "Nuclear",
+    }
+    clinical = modality_names.get(modality, modality)
+    dim_label = {
+        "2D cine": "2D_animated",
+        "3D volume": "3D",
+        "3D+T volume": "3D_animated",
+        "still image": "2D",
+    }
+    dt = dim_label.get(data_type, data_type.replace(" ", "_"))
+    return f"{clinical}_{dt}"
+
+
+def _get_data_type_label(input_path: Path, series_uid: str | None) -> str:
+    """Analyze input to produce a data type label for auto-naming output files."""
+    try:
+        if input_path.is_file():
+            import pydicom
+
+            ds = pydicom.dcmread(str(input_path), stop_before_pixels=True)
+            modality = getattr(ds, "Modality", "unknown")
+            n_frames = int(getattr(ds, "NumberOfFrames", 1))
+            if n_frames > 1:
+                return _data_type_label(modality, "2D cine")
+            return _data_type_label(modality, "still image")
+
+        from dicom2glb.io.dicom_reader import analyze_series
+
+        series_list = analyze_series(input_path)
+        if not series_list:
+            return ""
+
+        if series_uid:
+            for info in series_list:
+                if series_uid in info.series_uid:
+                    return _data_type_label(info.modality, info.data_type)
+
+        return _data_type_label(series_list[0].modality, series_list[0].data_type)
+    except Exception:
+        return ""
 
 
 def _run_animated_pipeline(data, converter, params, alpha, progress):
