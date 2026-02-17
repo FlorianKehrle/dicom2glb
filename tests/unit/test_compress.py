@@ -113,6 +113,130 @@ def _build_textured_glb(path: Path, num_textures: int = 1, size: int = 128) -> N
     gltf.save(str(path))
 
 
+def _build_animated_textured_glb(path: Path, num_frames: int = 3, size: int = 128) -> None:
+    """Build a textured GLB with scale-toggle animation (like gallery lightbox)."""
+    from dicom2glb.glb.builder import _pad_to_4, write_accessor
+    from dicom2glb.glb.texture import pixel_data_to_png
+
+    gltf = pygltflib.GLTF2(
+        scene=0,
+        scenes=[pygltflib.Scene(nodes=[])],
+        nodes=[],
+        meshes=[],
+        accessors=[],
+        bufferViews=[],
+        buffers=[],
+        materials=[],
+        textures=[],
+        images=[],
+        samplers=[pygltflib.Sampler(
+            magFilter=pygltflib.LINEAR,
+            minFilter=pygltflib.LINEAR,
+        )],
+        animations=[],
+    )
+    binary_data = bytearray()
+
+    # Shared quad geometry
+    vertices = np.array([[-0.5, -0.5, 0], [0.5, -0.5, 0], [0.5, 0.5, 0], [-0.5, 0.5, 0]], dtype=np.float32)
+    texcoords = np.array([[0, 1], [1, 1], [1, 0], [0, 0]], dtype=np.float32)
+    normals = np.array([[0, 0, 1]] * 4, dtype=np.float32)
+    indices = np.array([0, 1, 2, 0, 2, 3], dtype=np.uint16)
+
+    for arr, target in [
+        (vertices, pygltflib.ARRAY_BUFFER),
+        (normals, pygltflib.ARRAY_BUFFER),
+        (texcoords, pygltflib.ARRAY_BUFFER),
+        (indices, pygltflib.ELEMENT_ARRAY_BUFFER),
+    ]:
+        off = len(binary_data)
+        raw = arr.tobytes()
+        binary_data.extend(raw)
+        _pad_to_4(binary_data)
+        bv_idx = len(gltf.bufferViews)
+        gltf.bufferViews.append(pygltflib.BufferView(
+            buffer=0, byteOffset=off, byteLength=len(raw), target=target,
+        ))
+
+    pos_bv, norm_bv, tc_bv, idx_bv = 0, 1, 2, 3
+    gltf.accessors.extend([
+        pygltflib.Accessor(bufferView=pos_bv, componentType=pygltflib.FLOAT, count=4, type=pygltflib.VEC3,
+                           max=vertices.max(axis=0).tolist(), min=vertices.min(axis=0).tolist()),
+        pygltflib.Accessor(bufferView=norm_bv, componentType=pygltflib.FLOAT, count=4, type=pygltflib.VEC3),
+        pygltflib.Accessor(bufferView=tc_bv, componentType=pygltflib.FLOAT, count=4, type=pygltflib.VEC2),
+        pygltflib.Accessor(bufferView=idx_bv, componentType=pygltflib.UNSIGNED_SHORT, count=6,
+                           type=pygltflib.SCALAR, max=[3], min=[0]),
+    ])
+
+    # Create one textured node per frame
+    node_indices = []
+    for i in range(num_frames):
+        rng = np.random.RandomState(42 + i)
+        pixel_data = rng.randint(0, 255, (size, size), dtype=np.uint8)
+        png_bytes = pixel_data_to_png(pixel_data.astype(np.float32))
+
+        img_offset = len(binary_data)
+        binary_data.extend(png_bytes)
+        _pad_to_4(binary_data)
+
+        img_bv_idx = len(gltf.bufferViews)
+        gltf.bufferViews.append(pygltflib.BufferView(
+            buffer=0, byteOffset=img_offset, byteLength=len(png_bytes),
+        ))
+        gltf.images.append(pygltflib.Image(bufferView=img_bv_idx, mimeType="image/png"))
+        gltf.textures.append(pygltflib.Texture(sampler=0, source=i))
+        gltf.materials.append(pygltflib.Material(
+            name=f"frame_{i}",
+            pbrMetallicRoughness=pygltflib.PbrMetallicRoughness(
+                baseColorTexture=pygltflib.TextureInfo(index=i),
+                metallicFactor=0.0, roughnessFactor=1.0,
+            ),
+            doubleSided=True,
+        ))
+
+        mesh_idx = len(gltf.meshes)
+        gltf.meshes.append(pygltflib.Mesh(
+            name=f"frame_{i}",
+            primitives=[pygltflib.Primitive(
+                attributes=pygltflib.Attributes(POSITION=0, NORMAL=1, TEXCOORD_0=2),
+                indices=3, material=i,
+            )],
+        ))
+
+        scale = [1.0, 1.0, 1.0] if i == 0 else [0.0, 0.0, 0.0]
+        node_idx = len(gltf.nodes)
+        gltf.nodes.append(pygltflib.Node(name=f"frame_{i}", mesh=mesh_idx, scale=scale))
+        gltf.scenes[0].nodes.append(node_idx)
+        node_indices.append(node_idx)
+
+    # Add scale-toggle animation
+    dt = 0.0333
+    keyframe_times = np.array([i * dt for i in range(num_frames)], dtype=np.float32)
+    time_acc = write_accessor(gltf, binary_data, keyframe_times, None, pygltflib.FLOAT, pygltflib.SCALAR, True)
+
+    channels = []
+    samplers = []
+    for i, node_idx in enumerate(node_indices):
+        scales = np.zeros((num_frames, 3), dtype=np.float32)
+        scales[i] = [1.0, 1.0, 1.0]
+        s_acc = write_accessor(gltf, binary_data, scales, None, pygltflib.FLOAT, pygltflib.VEC3)
+        sampler_idx = len(samplers)
+        samplers.append(pygltflib.AnimationSampler(
+            input=time_acc, output=s_acc, interpolation=pygltflib.ANIM_STEP,
+        ))
+        channels.append(pygltflib.AnimationChannel(
+            sampler=sampler_idx,
+            target=pygltflib.AnimationChannelTarget(node=node_idx, path="scale"),
+        ))
+
+    gltf.animations.append(pygltflib.Animation(name="cycle", channels=channels, samplers=samplers))
+
+    gltf.buffers.append(pygltflib.Buffer(byteLength=len(binary_data)))
+    gltf.set_binary_blob(bytes(binary_data))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    gltf.save(str(path))
+
+
 class TestConstrainGlbSize:
     """Tests for constrain_glb_size."""
 
@@ -183,6 +307,46 @@ class TestConstrainGlbSize:
         _build_textured_glb(path, num_textures=1, size=32)
         with pytest.raises(ValueError, match="Unknown compression strategy"):
             constrain_glb_size(path, max_bytes=1, strategy="invalid")
+
+    def test_draco_preserves_animations(self, tmp_path):
+        """Draco strategy should not strip animations from animated GLBs."""
+        path = tmp_path / "animated.glb"
+        _build_animated_textured_glb(path, num_frames=3, size=256)
+        original_size = path.stat().st_size
+
+        gltf_before = pygltflib.GLTF2.load(str(path))
+        assert len(gltf_before.animations) == 1
+        channels_before = len(gltf_before.animations[0].channels)
+
+        constrain_glb_size(path, max_bytes=original_size - 1, strategy="draco")
+
+        gltf_after = pygltflib.GLTF2.load(str(path))
+        assert len(gltf_after.animations) == 1
+        assert len(gltf_after.animations[0].channels) == channels_before
+
+    def test_jpeg_preserves_animations(self, tmp_path):
+        """JPEG strategy should preserve animations."""
+        path = tmp_path / "animated.glb"
+        _build_animated_textured_glb(path, num_frames=3, size=256)
+        original_size = path.stat().st_size
+
+        constrain_glb_size(path, max_bytes=original_size - 1, strategy="jpeg")
+
+        gltf = pygltflib.GLTF2.load(str(path))
+        assert len(gltf.animations) == 1
+        assert len(gltf.animations[0].channels) > 0
+
+    def test_downscale_preserves_animations(self, tmp_path):
+        """Downscale strategy should preserve animations."""
+        path = tmp_path / "animated.glb"
+        _build_animated_textured_glb(path, num_frames=3, size=256)
+        original_size = path.stat().st_size
+
+        constrain_glb_size(path, max_bytes=original_size - 1, strategy="downscale")
+
+        gltf = pygltflib.GLTF2.load(str(path))
+        assert len(gltf.animations) == 1
+        assert len(gltf.animations[0].channels) > 0
 
 
 class TestReencodeImage:

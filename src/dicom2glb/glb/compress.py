@@ -76,6 +76,12 @@ def _has_draco() -> bool:
 def _apply_draco(path: Path) -> bool:
     """Compress mesh data in a GLB using trimesh's Draco support."""
     try:
+        # Trimesh does not preserve glTF animations — skip if present
+        gltf_check = pygltflib.GLTF2.load(str(path))
+        if gltf_check.animations:
+            logger.debug("Skipping Draco compression — GLB contains animations")
+            return False
+
         import trimesh
 
         scene = trimesh.load(str(path), force="scene")
