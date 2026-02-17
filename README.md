@@ -17,6 +17,7 @@ No existing end-to-end CLI tool converts DICOM directly to animated GLB for augm
 - **Interactive series selection** -- choose which series to convert from a Rich table, or let the tool auto-select the best one
 - **Multi-format export** -- GLB (with animation and PBR materials), STL, and OBJ
 - **AR-optimized meshes** -- Taubin smoothing (volume-preserving), decimation to configurable triangle count, and configurable transparency
+- **GLB size constraint** -- automatic compression to fit AR viewer limits (default 99 MB) with three strategies: Draco mesh compression, texture downscaling, or JPEG re-encoding
 - **Multi-threshold layered output** -- extract multiple structures at different intensity thresholds with per-layer colors and transparency
 
 ## Installation
@@ -62,6 +63,9 @@ dicom2glb ./data/ -o layers.glb --multi-threshold "200:bone:1.0,100:tissue:0.5"
 
 # Export as STL or OBJ
 dicom2glb ./data/ -o model.stl -f stl
+
+# Limit output to 50 MB with JPEG compression
+dicom2glb ./data/ -o output.glb --max-size 50 --compress jpeg
 ```
 
 ## Gallery Mode
@@ -100,6 +104,32 @@ dicom2glb ./dicom_folder/ -o output/ --gallery --series 1.2.840...
 ```
 
 The spatial layout uses `ImagePositionPatient` and `ImageOrientationPatient` from the DICOM metadata to place each quad at its real-world position. If no spatial metadata is available, the spatial output is skipped.
+
+## GLB Size Constraint
+
+Output GLB files are automatically constrained to 99 MB (configurable) to fit AR viewer limits. If a GLB exceeds the limit, it is compressed using one of three strategies:
+
+| Strategy | Method | Quality | Speed |
+|---|---|---|---|
+| `draco` (default) | Draco mesh compression + texture downscale fallback | Best | Moderate |
+| `downscale` | Progressive texture resolution reduction (lossless PNG) | High | Fast |
+| `jpeg` | JPEG re-encoding with decreasing quality | Lower | Fast |
+
+Draco compresses mesh geometry losslessly and falls back to texture downscaling if still over the limit. The downscale strategy keeps PNG format but reduces resolution in steps (75%, 50%, 37.5%, 25%). The JPEG strategy re-encodes textures with progressively lower quality (90 down to 30) and scaling.
+
+```bash
+# Default: 99 MB limit with Draco strategy
+dicom2glb ./data/ -o output.glb
+
+# Custom size limit
+dicom2glb ./data/ -o output.glb --max-size 50
+
+# Use JPEG compression (smaller but lossy)
+dicom2glb ./data/ -o output.glb --compress jpeg
+
+# Disable size constraint
+dicom2glb ./data/ -o output.glb --max-size 0
+```
 
 ## Series Selection
 
@@ -241,6 +271,8 @@ Options:
   --faces INTEGER         Target triangle count after decimation (default: 80000)
   --alpha FLOAT           Global transparency 0.0-1.0 (default: 1.0)
   --multi-threshold TEXT   Multi-threshold config: "val:label:alpha,..."
+  --max-size INTEGER      Maximum output GLB file size in MB, 0 to disable (default: 99)
+  --compress TEXT         Compression strategy: draco, downscale, jpeg (default: draco)
   --gallery               Gallery mode: individual GLBs, lightbox grid, and spatial fan
   --columns INTEGER       Lightbox grid columns in gallery mode (default: 6)
   --series TEXT           Select DICOM series by UID (partial match)
@@ -278,7 +310,7 @@ src/dicom2glb/
 │   └── medsam2.py      # MedSAM2 AI segmentation
 ├── gallery/            # Gallery mode (individual, lightbox, spatial)
 ├── mesh/               # Taubin smoothing, decimation, temporal processing
-└── glb/                # GLB builder, morph target animation, textures
+└── glb/                # GLB builder, morph target animation, textures, compression
 ```
 
 ## Testing
