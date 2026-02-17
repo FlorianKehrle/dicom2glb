@@ -43,17 +43,23 @@ pip install -e ".[dev]"
 ## Quick Start
 
 ```bash
-# Convert a DICOM directory to GLB (3D mesh)
-dicom2glb ./dicom_folder/ -o output.glb
+# Convert a DICOM directory to GLB (3D mesh) → dicom_folder.glb
+dicom2glb ./dicom_folder/
+
+# Explicit output name
+dicom2glb ./echo_folder/ -o heart.glb
+
+# Output to a directory — filename derived from input → output/echo_folder.glb
+dicom2glb ./echo_folder/ -o output/
 
 # Animated 3D echo (cardiac cycle with morph targets)
 dicom2glb ./echo_folder/ -o heart.glb --animate
 
-# Single DICOM image to textured plane
-dicom2glb image.dcm -o plane.glb
+# Single DICOM image to textured plane → image.glb
+dicom2glb image.dcm
 
 # Gallery mode: individual GLBs + lightbox grid + spatial fan
-dicom2glb ./dicom_folder/ -o output/ --gallery
+dicom2glb ./dicom_folder/ --gallery
 
 # Cardiac CT with AI segmentation (7 structures)
 dicom2glb ./ct_folder/ -o heart.glb --method totalseg
@@ -65,7 +71,7 @@ dicom2glb ./data/ -o layers.glb --multi-threshold "200:bone:1.0,100:tissue:0.5"
 dicom2glb ./data/ -o model.stl -f stl
 
 # Limit output to 50 MB with JPEG compression
-dicom2glb ./data/ -o output.glb --max-size 50 --compress jpeg
+dicom2glb ./data/ --max-size 50 --compress jpeg
 ```
 
 ## Gallery Mode
@@ -261,7 +267,7 @@ Arguments:
   INPUT_PATH              Path to DICOM file or directory
 
 Options:
-  -o, --output PATH       Output file path (default: output.glb)
+  -o, --output PATH       Output file path (default: <input_name>.glb)
   -m, --method TEXT        Conversion method: classical, marching-cubes, totalseg, medsam2
   -f, --format TEXT        Output format: glb, stl, obj (default: glb)
   --animate               Enable animation for temporal data

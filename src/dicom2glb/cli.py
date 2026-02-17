@@ -73,10 +73,10 @@ def main(
         exists=True,
     ),
     output: Path = typer.Option(
-        "output.glb",
+        None,
         "-o",
         "--output",
-        help="Output file path.",
+        help="Output file path (default: <input_name>.glb).",
     ),
     method: str = typer.Option(
         "classical",
@@ -191,6 +191,17 @@ def main(
         series_list = analyze_series(input_path)
         _print_series_table(series_list, input_path)
         raise typer.Exit()
+
+    # Derive output path from input name when not fully specified
+    stem = input_path.stem if input_path.is_file() else input_path.name
+    if output is None:
+        if gallery:
+            output = Path(stem)
+        else:
+            output = Path(f"{stem}.{format}")
+    elif not gallery and output.suffix == "":
+        # -o points to a directory — put <input_name>.<format> inside it
+        output = output / f"{stem}.{format}"
 
     try:
         if gallery:
