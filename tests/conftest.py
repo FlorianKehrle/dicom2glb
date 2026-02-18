@@ -1,4 +1,4 @@
-"""Shared test fixtures: synthetic DICOM data."""
+"""Shared test fixtures: synthetic DICOM and CARTO data."""
 
 from __future__ import annotations
 
@@ -10,8 +10,11 @@ import pytest
 from pydicom.dataset import FileDataset
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
-from med2glb.core.types import MaterialConfig, MeshData
+from med2glb.core.types import CartoMesh, CartoPoint, CartoStudy, MaterialConfig, MeshData
 from med2glb.core.volume import DicomVolume, TemporalSequence
+
+# Path to real CARTO example data (may not exist on CI)
+CARTO_EXAMPLE_DATA = Path(__file__).parent.parent / "CARTO_Example_Data"
 
 
 @pytest.fixture
@@ -424,3 +427,120 @@ def _write_synthetic_dicom(
 
     ds.PixelData = pixel_data.tobytes()
     ds.save_as(str(path))
+
+
+# ---- CARTO Fixtures ----
+
+
+@pytest.fixture
+def synthetic_carto_mesh() -> CartoMesh:
+    """Create a synthetic CARTO mesh (small icosphere-like shape)."""
+    vertices = np.array([
+        [0, 0, 1], [1, 0, 0], [0, 1, 0], [-1, 0, 0],
+        [0, -1, 0], [0, 0, -1], [0.5, 0.5, 0.5], [-0.5, 0.5, 0.5],
+        [0.5, -0.5, 0.5], [-0.5, -0.5, 0.5], [0.5, 0.5, -0.5],
+        [-0.5, 0.5, -0.5], [0.5, -0.5, -0.5], [-0.5, -0.5, -0.5],
+    ], dtype=np.float64) * 30
+
+    faces = np.array([
+        [0, 6, 7], [0, 8, 6], [0, 7, 9], [0, 9, 8],
+        [5, 10, 11], [5, 12, 10], [5, 11, 13], [5, 13, 12],
+        [6, 1, 10], [7, 11, 3], [8, 4, 12], [9, 13, 4],
+    ], dtype=np.int32)
+
+    normals = np.zeros_like(vertices)
+    norms = np.linalg.norm(vertices, axis=1, keepdims=True)
+    norms[norms == 0] = 1
+    normals = vertices / norms
+
+    group_ids = np.zeros(len(vertices), dtype=np.int32)
+    face_group_ids = np.zeros(len(faces), dtype=np.int32)
+
+    return CartoMesh(
+        mesh_id=1,
+        vertices=vertices,
+        faces=faces,
+        normals=normals,
+        group_ids=group_ids,
+        face_group_ids=face_group_ids,
+        mesh_color=(0.0, 1.0, 0.0, 1.0),
+        color_names=["Unipolar", "Bipolar", "LAT"],
+        structure_name="test_mesh",
+    )
+
+
+@pytest.fixture
+def synthetic_carto_points() -> list[CartoPoint]:
+    """Create synthetic CARTO measurement points near the mesh vertices."""
+    points = []
+    rng = np.random.RandomState(42)
+    for i in range(20):
+        pos = rng.randn(3) * 20
+        points.append(CartoPoint(
+            point_id=i,
+            position=pos,
+            orientation=rng.randn(3),
+            bipolar_voltage=rng.uniform(0.1, 5.0),
+            unipolar_voltage=rng.uniform(1.0, 15.0),
+            lat=rng.uniform(-200, 100),
+        ))
+    return points
+
+
+@pytest.fixture
+def synthetic_carto_study(
+    synthetic_carto_mesh, synthetic_carto_points,
+) -> CartoStudy:
+    """Create a synthetic CARTO study with one mesh and points."""
+    return CartoStudy(
+        meshes=[synthetic_carto_mesh],
+        points={"test_mesh": synthetic_carto_points},
+        version="6.0",
+        study_name="test_study",
+    )
+
+
+@pytest.fixture
+def carto_mesh_dir(tmp_path) -> Path:
+    """Create a temporary directory with synthetic CARTO .mesh and _car.txt files."""
+    mesh_text = """\
+#TriangulatedMeshVersion2.0
+; Synthetic test mesh
+
+[GeneralAttributes]
+MeshID                 = 1
+MeshName               =
+NumVertex              = 4
+NumTriangle            = 2
+TopologyStatus         = 0
+MeshColor              = 0.00000   1.00000   0.00000   1.00000
+Matrix                 = 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1
+NumVertexColors        = 3
+ColorsIDs              = 0  1  2
+ColorsNames            = Unipolar  Bipolar  LAT
+
+[VerticesSection]
+;                   X             Y             Z        NormalX   NormalY   NormalZ  GroupID
+
+       0 =         0.000         0.000         0.000     0.00000   0.00000   1.00000        0
+       1 =        10.000         0.000         0.000     0.00000   0.00000   1.00000        0
+       2 =         5.000        10.000         0.000     0.00000   0.00000   1.00000        0
+       3 =         5.000         5.000         5.000     0.00000   0.00000   1.00000  -1000000
+
+[TrianglesSection]
+;           Vertex0  Vertex1  Vertex2     NormalX   NormalY   NormalZ  GroupID
+
+       0 =        0        1        2     0.00000   0.00000   1.00000        0
+       1 =        0        1        3     0.00000   0.00000   1.00000  -1000000
+"""
+    (tmp_path / "1-TestMap.mesh").write_text(mesh_text, encoding="utf-8")
+
+    car_text = """\
+VERSION_6_0 1-TestMap
+P\t0\t1\t0\t1.0\t1.0\t0.0\t0.1\t0.2\t0.3\t2.5\t8.0\t-50\t-10000\t0\t4\t1\tA\t0\t100\t0
+P\t0\t2\t0\t9.0\t1.0\t0.0\t0.1\t0.2\t0.3\t1.0\t5.0\t100\t-10000\t0\t4\t1\tA\t0\t100\t0
+P\t0\t3\t0\t5.0\t9.0\t0.0\t0.1\t0.2\t0.3\t3.0\t12.0\t-10000\t-10000\t0\t4\t1\tA\t0\t100\t0
+"""
+    (tmp_path / "1-TestMap_car.txt").write_text(car_text, encoding="utf-8")
+
+    return tmp_path

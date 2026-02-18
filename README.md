@@ -1,8 +1,8 @@
 # med2glb
 
-Convert DICOM medical imaging data to GLB 3D models optimized for AR viewing.
+Convert DICOM and CARTO 3 electro-anatomical mapping data to GLB 3D models optimized for AR viewing.
 
-Supports 3D echocardiography, cardiac CT/MRI, 2D cine clips, and single DICOM slices. Outputs GLB files with PBR materials, animated cardiac cycles, and multi-structure segmentation with per-structure coloring.
+Supports 3D echocardiography, cardiac CT/MRI, 2D cine clips, single DICOM slices, and CARTO 3 EP mapping data. Outputs GLB files with PBR materials, animated cardiac cycles, per-vertex voltage/LAT heatmaps, and multi-structure segmentation with per-structure coloring.
 
 ## Why med2glb?
 
@@ -10,7 +10,8 @@ No existing end-to-end CLI tool converts DICOM directly to animated GLB for augm
 
 **Key features:**
 
-- **Animated cardiac output** -- 2D cine clips become animated GLB with per-frame texture planes; 3D temporal volumes use morph targets
+- **CARTO 3 EP mapping support** -- auto-detects CARTO export directories; renders LAT, bipolar voltage, and unipolar voltage heatmaps as per-vertex colored GLBs; animated LAT wavefront sweep
+- **Animated cardiac output** -- 2D cine clips become animated GLB with per-frame texture planes; 3D temporal volumes use morph targets; CARTO LAT wavefront animation
 - **Gallery mode** -- convert every slice to textured quads with three layouts: individual GLBs, lightbox grid, and spatial fan positioned using DICOM metadata
 - **Pluggable conversion methods** -- classical (Gaussian + adaptive threshold), marching cubes, TotalSegmentator (CT), and MedSAM2 (echo/general)
 - **Automatic series detection** -- multi-series DICOM folders are analyzed and classified (3D volume, 2D cine, still image) with per-series conversion recommendations
@@ -72,6 +73,42 @@ med2glb ./data/ -o model.stl -f stl
 # Limit output to 50 MB with JPEG compression
 med2glb ./data/ --max-size 50 --compress jpeg
 ```
+
+## CARTO 3 Electro-Anatomical Mapping
+
+med2glb auto-detects CARTO 3 export directories (containing `.mesh` files) and converts them to GLB with per-vertex coloring from the mapping data. Supports old CARTO (~2015, v4), v7.1 (v5), and v7.2+ (v6) formats.
+
+```bash
+# Auto-detect and convert with LAT coloring (default)
+med2glb ./Export_Study-1-01_09_2023-20-30-09/
+
+# Bipolar voltage map (scar mapping)
+med2glb ./Export_Study/ --coloring bipolar
+
+# Unipolar voltage map
+med2glb ./Export_Study/ --coloring unipolar
+
+# Animated LAT wavefront sweep
+med2glb ./Export_Study/ --animate
+
+# Explicit output path
+med2glb ./Export_Study/ -o left_atrium_lat.glb --coloring lat
+```
+
+**Coloring schemes:**
+
+| Scheme | Clinical Use | Color Range |
+|---|---|---|
+| `lat` (default) | Local activation time | Red (early) → yellow → green → cyan → blue → purple (late) |
+| `bipolar` | Substrate/scar mapping | Red (scar, <0.5 mV) → yellow → green → cyan → purple (normal, >1.5 mV) |
+| `unipolar` | Voltage mapping | Red (low) → yellow → green → blue (high) |
+
+**What gets parsed:**
+- `.mesh` files: 3D surface geometry with per-vertex group IDs (inactive vertices filtered out)
+- `_car.txt` files: sparse measurement points mapped to mesh vertices via nearest-neighbor + linear interpolation
+- LAT sentinel value `-10000` is treated as unmapped (rendered as transparent gray)
+
+When a CARTO export contains multiple meshes (e.g. LA, RA), an interactive selection table is displayed.
 
 ## Gallery Mode
 
@@ -269,6 +306,7 @@ Options:
   -o, --output PATH       Output file path (default: <input>_<modality>_<type>.glb next to input)
   -m, --method TEXT        Conversion method: classical, marching-cubes, totalseg, medsam2
   -f, --format TEXT        Output format: glb, stl, obj (default: glb)
+  --coloring TEXT         CARTO coloring: lat, bipolar, unipolar (default: lat)
   --animate               Enable animation for temporal data
   --no-animate            Force static output even if temporal data is detected
   --threshold FLOAT       Intensity threshold for isosurface extraction
@@ -307,7 +345,7 @@ Options:
 src/med2glb/
 ├── cli.py              # Typer CLI entry point
 ├── core/               # Data types (MeshData, DicomVolume, GallerySlice, etc.)
-├── io/                 # DICOM reading, echo reader, exporters
+├── io/                 # DICOM reading, echo reader, CARTO reader/mapper, exporters
 ├── methods/            # Pluggable conversion methods (registry pattern)
 │   ├── classical.py    # Gaussian smoothing + adaptive threshold
 │   ├── marching_cubes.py  # Basic isosurface extraction
@@ -315,7 +353,7 @@ src/med2glb/
 │   └── medsam2.py      # MedSAM2 AI segmentation
 ├── gallery/            # Gallery mode (individual, lightbox, spatial)
 ├── mesh/               # Taubin smoothing, decimation, temporal processing
-└── glb/                # GLB builder, morph target animation, textures, compression
+└── glb/                # GLB builder, morph target animation, CARTO animation, textures, compression
 ```
 
 ## Testing

@@ -53,17 +53,26 @@ def _add_mesh_to_gltf(
 
     # Create material
     material_idx = len(gltf.materials)
-    alpha_mode = pygltflib.BLEND if mat.alpha < 1.0 else pygltflib.OPAQUE
+    has_vertex_colors = mesh_data.vertex_colors is not None
+    # When vertex colors are present, use white base so COLOR_0 drives appearance
+    if has_vertex_colors:
+        base_color_factor = [1.0, 1.0, 1.0, 1.0]
+        # Enable blending if any vertex alpha < 1
+        has_transparency = np.any(mesh_data.vertex_colors[:, 3] < 0.99)
+        alpha_mode = pygltflib.BLEND if has_transparency else pygltflib.OPAQUE
+    else:
+        base_color_factor = [
+            mat.base_color[0],
+            mat.base_color[1],
+            mat.base_color[2],
+            mat.alpha,
+        ]
+        alpha_mode = pygltflib.BLEND if mat.alpha < 1.0 else pygltflib.OPAQUE
     gltf.materials.append(
         pygltflib.Material(
             name=mat.name or mesh_data.structure_name,
             pbrMetallicRoughness=pygltflib.PbrMetallicRoughness(
-                baseColorFactor=[
-                    mat.base_color[0],
-                    mat.base_color[1],
-                    mat.base_color[2],
-                    mat.alpha,
-                ],
+                baseColorFactor=base_color_factor,
                 metallicFactor=mat.metallic,
                 roughnessFactor=mat.roughness,
             ),
@@ -132,6 +141,35 @@ def _add_mesh_to_gltf(
             )
         )
 
+    # Add vertex colors (COLOR_0) if available
+    color_acc_idx = None
+    if has_vertex_colors:
+        colors = mesh_data.vertex_colors.astype(np.float32)
+        color_data = colors.tobytes()
+        color_offset = len(binary_data)
+        binary_data.extend(color_data)
+        _pad_to_4(binary_data)
+
+        color_bv_idx = len(gltf.bufferViews)
+        gltf.bufferViews.append(
+            pygltflib.BufferView(
+                buffer=0,
+                byteOffset=color_offset,
+                byteLength=len(color_data),
+                target=pygltflib.ARRAY_BUFFER,
+            )
+        )
+
+        color_acc_idx = len(gltf.accessors)
+        gltf.accessors.append(
+            pygltflib.Accessor(
+                bufferView=color_bv_idx,
+                componentType=pygltflib.FLOAT,
+                count=len(colors),
+                type=pygltflib.VEC4,
+            )
+        )
+
     # Add face indices
     faces = mesh_data.faces.astype(np.uint32)
     idx_data = faces.tobytes()
@@ -165,6 +203,8 @@ def _add_mesh_to_gltf(
     attributes = pygltflib.Attributes(POSITION=pos_acc_idx)
     if normal_acc_idx is not None:
         attributes.NORMAL = normal_acc_idx
+    if color_acc_idx is not None:
+        attributes.COLOR_0 = color_acc_idx
 
     primitive = pygltflib.Primitive(
         attributes=attributes,

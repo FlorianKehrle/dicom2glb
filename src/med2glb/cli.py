@@ -7,6 +7,8 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
+
 import typer
 from rich.console import Console
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn
@@ -132,6 +134,11 @@ def main(
         is_eager=True,
         help="List available conversion methods and exit.",
     ),
+    coloring: str = typer.Option(
+        "lat",
+        "--coloring",
+        help="CARTO coloring scheme: lat, bipolar, unipolar.",
+    ),
     gallery: bool = typer.Option(
         False,
         "--gallery",
@@ -210,6 +217,22 @@ def main(
             output = output / f"{auto_stem}.{format}"
 
     try:
+        # Auto-detect CARTO data
+        if input_path.is_dir():
+            from med2glb.io.carto_reader import detect_carto_directory
+            if detect_carto_directory(input_path):
+                _run_carto_pipeline(
+                    input_path=input_path,
+                    output=output,
+                    coloring=coloring,
+                    animate=animate,
+                    max_size_mb=max_size,
+                    compress_strategy=compress,
+                    target_faces=faces,
+                    verbose=verbose,
+                )
+                return
+
         if gallery:
             _run_gallery_mode(
                 input_path=input_path,
@@ -372,6 +395,157 @@ def _run_pipeline(
             compress_strategy=compress_strategy,
             verbose=verbose,
         )
+
+
+def _run_carto_pipeline(
+    input_path: Path,
+    output: Path,
+    coloring: str,
+    animate: bool,
+    max_size_mb: int,
+    compress_strategy: str,
+    target_faces: int,
+    verbose: bool,
+) -> None:
+    """Execute the CARTO conversion pipeline."""
+    from med2glb.io.carto_mapper import carto_mesh_to_mesh_data
+    from med2glb.io.carto_reader import load_carto_study
+    from med2glb.glb.builder import build_glb
+
+    start_time = time.time()
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        # Step 1: Load CARTO study
+        task = progress.add_task("Loading CARTO data...", total=None)
+        study = load_carto_study(input_path)
+        progress.update(
+            task,
+            description=f"Loaded CARTO v{study.version}: "
+            f"{len(study.meshes)} mesh(es), "
+            f"{sum(len(p) for p in study.points.values())} points",
+        )
+        progress.remove_task(task)
+
+    if not study.meshes:
+        err_console.print("[red]No meshes found in CARTO export.[/red]")
+        raise typer.Exit(code=1)
+
+    # Interactive mesh selection for multi-mesh studies
+    if len(study.meshes) > 1 and sys.stdin.isatty():
+        table = Table(title="CARTO Meshes")
+        table.add_column("#", style="bold", justify="right")
+        table.add_column("Name")
+        table.add_column("Vertices", justify="right")
+        table.add_column("Triangles", justify="right")
+        table.add_column("Points", justify="right")
+
+        for i, mesh in enumerate(study.meshes, 1):
+            pts = study.points.get(mesh.structure_name, [])
+            n_active = int(np.sum(mesh.group_ids != -1000000))
+            table.add_row(
+                str(i),
+                mesh.structure_name,
+                f"{n_active:,} / {len(mesh.vertices):,}",
+                str(len(mesh.faces)),
+                str(len(pts)),
+            )
+
+        console.print(table)
+        choice = Prompt.ask(
+            f"Select mesh (1-{len(study.meshes)}) or 'all'",
+            default="all",
+            console=console,
+        )
+
+        if choice.strip().lower() == "all":
+            selected = list(range(len(study.meshes)))
+        else:
+            selected = []
+            for part in choice.split(","):
+                idx = int(part.strip()) - 1
+                if 0 <= idx < len(study.meshes):
+                    selected.append(idx)
+    else:
+        selected = list(range(len(study.meshes)))
+
+    # Convert each selected mesh
+    for mesh_idx in selected:
+        mesh = study.meshes[mesh_idx]
+        points = study.points.get(mesh.structure_name)
+
+        # Determine output path
+        if len(selected) == 1:
+            out_path = output
+        else:
+            out_path = output.parent / f"{mesh.structure_name}_{coloring}.glb"
+
+        # Auto-derive output name if the output still has .glb from DICOM auto-naming
+        if out_path == output and output.suffix == ".glb":
+            # Re-derive with CARTO naming
+            out_path = output.parent / f"{mesh.structure_name}_{coloring}.glb"
+
+        console.print(
+            f"\n[bold]Converting: {mesh.structure_name}[/bold] "
+            f"({coloring} coloring)"
+        )
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            # Step 2: Map points to vertex colors
+            task = progress.add_task("Mapping points to vertices...", total=None)
+            mesh_data = carto_mesh_to_mesh_data(mesh, points, coloring=coloring)
+            progress.update(
+                task,
+                description=f"Mapped: {len(mesh_data.vertices):,} vertices, "
+                f"{len(mesh_data.faces):,} faces",
+            )
+            progress.remove_task(task)
+
+            if animate and coloring == "lat" and points:
+                # Step 3a: Build animated GLB
+                task = progress.add_task("Building LAT wavefront animation...", total=None)
+                from med2glb.glb.carto_builder import build_carto_animated_glb
+                from med2glb.io.carto_mapper import map_points_to_vertices, interpolate_sparse_values
+
+                lat_values = map_points_to_vertices(mesh, points, field="lat")
+                lat_values = interpolate_sparse_values(mesh, lat_values)
+                # Filter to active vertices
+                active_mask = mesh.group_ids != -1000000
+                active_lat = lat_values[active_mask]
+
+                build_carto_animated_glb(
+                    mesh_data, active_lat, out_path,
+                    target_faces=target_faces,
+                )
+                progress.remove_task(task)
+            else:
+                # Step 3b: Build static GLB
+                task = progress.add_task("Building GLB...", total=None)
+                build_glb([mesh_data], out_path)
+                progress.remove_task(task)
+
+            # Step 4: Compress if needed
+            if max_size_mb > 0:
+                _enforce_size_limit(out_path, max_size_mb, compress_strategy, progress)
+
+        # Print summary
+        file_size = out_path.stat().st_size / 1024
+        elapsed = time.time() - start_time
+        console.print(f"\n[green]CARTO conversion complete![/green]")
+        console.print(f"  Input:    CARTO v{study.version} ({mesh.structure_name})")
+        console.print(f"  Coloring: {coloring}")
+        console.print(f"  Output:   {out_path}")
+        console.print(f"  Vertices: {len(mesh_data.vertices):,}")
+        console.print(f"  Faces:    {len(mesh_data.faces):,}")
+        console.print(f"  Size:     {file_size:.1f} KB")
+        console.print(f"  Time:     {elapsed:.1f}s")
 
 
 def _print_series_table(series_list: list[SeriesInfo], input_path: Path) -> None:

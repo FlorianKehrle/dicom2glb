@@ -19,10 +19,10 @@ Auto-generated from all feature plans. Last updated: 2026-02-09
 ```text
 src/med2glb/
 ├── cli.py              # Typer CLI entry point
-├── io/                 # DICOM reading + file export
+├── io/                 # DICOM reading, CARTO reader/mapper, file export
 ├── methods/            # Pluggable conversion methods (registry pattern)
 ├── mesh/               # Mesh processing (Taubin smoothing, decimation)
-├── glb/                # GLB construction + morph target animation
+├── glb/                # GLB construction + morph target animation + CARTO wavefront animation
 └── core/               # Data structures and types
 
 tests/
@@ -58,6 +58,7 @@ pytest --cov=med2glb
 
 ## Recent Changes
 
+- **carto-support**: CARTO 3 EP mapping support — .mesh/.car parser, per-vertex COLOR_0 heatmaps (LAT/bipolar/unipolar), animated LAT wavefront sweep, auto-detection
 - **1-dicom-glb-converter**: Initial feature — DICOM to GLB conversion with pluggable methods, morph target animation, cardiac segmentation
 
 <!-- MANUAL ADDITIONS START -->

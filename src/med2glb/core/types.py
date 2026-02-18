@@ -27,6 +27,7 @@ class MeshData:
     normals: np.ndarray | None = None  # float32 [N, 3]
     structure_name: str = "unknown"
     material: MaterialConfig = field(default_factory=MaterialConfig)
+    vertex_colors: np.ndarray | None = None  # float32 [N, 4] RGBA
 
 
 @dataclass
@@ -108,3 +109,40 @@ class GallerySlice:
     temporal_index: int | None
     series_uid: str
     modality: str
+
+
+@dataclass
+class CartoPoint:
+    """Single electro-anatomical mapping point from a CARTO _car.txt file."""
+
+    point_id: int
+    position: np.ndarray  # float64 [3] — X, Y, Z
+    orientation: np.ndarray  # float64 [3]
+    bipolar_voltage: float  # mV
+    unipolar_voltage: float  # mV
+    lat: float  # ms, NaN if sentinel -10000
+
+
+@dataclass
+class CartoMesh:
+    """Surface mesh from a CARTO .mesh file."""
+
+    mesh_id: int
+    vertices: np.ndarray  # float64 [N, 3]
+    faces: np.ndarray  # int32 [M, 3]
+    normals: np.ndarray  # float64 [N, 3]
+    group_ids: np.ndarray  # int32 [N] — vertex group IDs
+    face_group_ids: np.ndarray  # int32 [M] — face group IDs
+    mesh_color: tuple[float, float, float, float]  # RGBA default color
+    color_names: list[str]  # names of per-vertex color channels
+    structure_name: str = ""
+
+
+@dataclass
+class CartoStudy:
+    """A complete CARTO export directory with meshes and mapping points."""
+
+    meshes: list[CartoMesh]
+    points: dict[str, list[CartoPoint]]  # keyed by mesh/map name
+    version: str  # e.g. "4.0", "5.0", "6.0"
+    study_name: str = ""
