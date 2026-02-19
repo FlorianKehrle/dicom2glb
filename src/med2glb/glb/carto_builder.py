@@ -1,9 +1,10 @@
-"""CARTO animated GLB: LAT wavefront sweep using frame-based visibility.
+"""CARTO animated GLB: excitation highlight ring using frame-based visibility.
 
-Creates N mesh copies with different vertex colors representing the
-activation wavefront at each time step. Animation switches visible
-frame via scale [1,1,1] / [0,0,0] — universally supported in glTF
-viewers including HoloLens 2 (MRTK/glTFast).
+Creates N mesh copies with different vertex colors. The static colormap
+(LAT, bipolar, or unipolar) is always visible; a bright highlight ring
+sweeps across the surface following LAT activation timing.  Animation
+switches the visible frame via scale [1,1,1] / [0,0,0] — universally
+supported in glTF viewers including HoloLens 2 (MRTK/glTFast).
 """
 
 from __future__ import annotations
@@ -16,13 +17,13 @@ import pygltflib
 
 from med2glb.core.types import MeshData
 from med2glb.glb.builder import _pad_to_4, write_accessor
-from med2glb.io.carto_colormaps import _LAT_STOPS
 
 logger = logging.getLogger("med2glb")
 
-# Colors for wavefront animation
-_INACTIVE_COLOR = np.array([0.3, 0.3, 0.4, 1.0], dtype=np.float32)  # cool gray-blue
-_WAVEFRONT_WIDTH = 0.08  # fraction of LAT range for sigmoid transition
+# Highlight ring parameters
+_RING_WIDTH = 0.04  # σ of Gaussian (fraction of LAT range) — narrow bright band
+_HIGHLIGHT_COLOR = np.array([0.85, 1.0, 1.0], dtype=np.float32)  # bright cyan-white
+_HIGHLIGHT_INTENSITY = 0.75  # blend strength (0=invisible, 1=fully replaces base)
 
 
 def build_carto_animated_glb(
@@ -33,14 +34,15 @@ def build_carto_animated_glb(
     loop_duration_s: float = 2.0,
     target_faces: int = 20000,
 ) -> None:
-    """Build an animated GLB with LAT wavefront sweep.
+    """Build animated GLB with CARTO-style highlight ring over static colormap.
 
-    Each frame shows the activation wavefront at a different time step.
-    Activated vertices get warm LAT colors, inactive ones get cool gray.
+    The static vertex colors (from any coloring mode) remain visible at all
+    times.  A bright ring sweeps across the surface following LAT activation
+    timing.
 
     Args:
-        mesh_data: MeshData with vertices, faces, normals (from carto_mesh_to_mesh_data).
-        lat_values: Per-vertex LAT values (ms), NaN for unknown.
+        mesh_data: MeshData with vertex_colors set (LAT/bipolar/unipolar colormap).
+        lat_values: Per-vertex LAT values (ms) for ring timing. NaN for unknown.
         output_path: Where to write the .glb file.
         n_frames: Number of animation frames.
         loop_duration_s: Total animation loop time in seconds.
@@ -50,13 +52,16 @@ def build_carto_animated_glb(
     if len(mesh_data.faces) > target_faces:
         from med2glb.mesh.processing import decimate, compute_normals
 
+        orig_colors = mesh_data.vertex_colors
         decimated = decimate(mesh_data, target_faces=target_faces)
         decimated = compute_normals(decimated)
-        # Resample LAT values to decimated mesh via nearest neighbor
+        # Resample LAT values and vertex colors to decimated mesh via nearest neighbor
         from scipy.spatial import KDTree
         tree = KDTree(mesh_data.vertices)
         _, idx = tree.query(decimated.vertices)
         lat_values = lat_values[idx]
+        if orig_colors is not None:
+            decimated.vertex_colors = orig_colors[idx]
         mesh_data = decimated
 
     valid_lat = ~np.isnan(lat_values)
@@ -78,37 +83,30 @@ def build_carto_animated_glb(
     lat_norm = (lat_values - lat_min) / lat_range
     lat_norm[~valid_lat] = np.nan
 
-    # Build color stop arrays for LAT colormap interpolation
-    positions = np.array([s[0] for s in _LAT_STOPS])
-    r_stops = np.array([s[1] for s in _LAT_STOPS])
-    g_stops = np.array([s[2] for s in _LAT_STOPS])
-    b_stops = np.array([s[3] for s in _LAT_STOPS])
+    # Base colors from static coloring (mesh_data.vertex_colors)
+    n_verts = len(mesh_data.vertices)
+    if mesh_data.vertex_colors is not None:
+        base_colors = mesh_data.vertex_colors.astype(np.float32)
+    else:
+        # Fallback: neutral light gray if no colormap was applied
+        base_colors = np.full((n_verts, 4), [0.7, 0.7, 0.7, 1.0], dtype=np.float32)
 
-    # Generate per-frame vertex colors
+    # Generate per-frame vertex colors with highlight ring
     frame_colors = []
     for fi in range(n_frames):
-        t = fi / (n_frames - 1)  # wavefront position in normalized LAT space
-        colors = np.zeros((len(mesh_data.vertices), 4), dtype=np.float32)
+        t = fi / (n_frames - 1)  # ring position in normalized LAT space
+        colors = base_colors.copy()
 
-        # Sigmoid activation: smooth transition at wavefront edge
-        activation = _sigmoid((t - lat_norm) / max(_WAVEFRONT_WIDTH, 1e-6))
-        activation[~valid_lat] = 0.0
+        # Gaussian ring: bright band centered at current wavefront position
+        ring = np.exp(-((lat_norm - t) ** 2) / (2 * _RING_WIDTH ** 2))
+        ring[~valid_lat] = 0.0
 
-        # Activated color from LAT colormap
-        active_r = np.interp(lat_norm, positions, r_stops)
-        active_g = np.interp(lat_norm, positions, g_stops)
-        active_b = np.interp(lat_norm, positions, b_stops)
-
-        # Blend between inactive and active based on activation
-        colors[:, 0] = activation * active_r + (1 - activation) * _INACTIVE_COLOR[0]
-        colors[:, 1] = activation * active_g + (1 - activation) * _INACTIVE_COLOR[1]
-        colors[:, 2] = activation * active_b + (1 - activation) * _INACTIVE_COLOR[2]
+        # Blend: base * (1 - blend) + highlight * blend
+        blend = (ring * _HIGHLIGHT_INTENSITY).reshape(-1, 1)
+        colors[:, :3] = colors[:, :3] * (1 - blend) + _HIGHLIGHT_COLOR * blend
         colors[:, 3] = 1.0
 
-        # NaN vertices stay inactive
-        colors[~valid_lat] = _INACTIVE_COLOR
-
-        frame_colors.append(colors)
+        frame_colors.append(colors.astype(np.float32))
 
     # Build glTF with N frame nodes
     gltf = pygltflib.GLTF2(
@@ -219,7 +217,7 @@ def build_carto_animated_glb(
         ))
 
     gltf.animations.append(pygltflib.Animation(
-        name="lat_wavefront",
+        name="excitation_ring",
         channels=channels,
         samplers=samplers,
     ))
@@ -236,13 +234,4 @@ def build_carto_animated_glb(
         f"CARTO animated GLB: {n_frames} frames, "
         f"{len(mesh_data.vertices)} verts, "
         f"{output_path.stat().st_size / 1024:.0f} KB"
-    )
-
-
-def _sigmoid(x: np.ndarray) -> np.ndarray:
-    """Numerically stable sigmoid for wavefront transition."""
-    return np.where(
-        x >= 0,
-        1 / (1 + np.exp(-np.clip(x, -30, 30))),
-        np.exp(np.clip(x, -30, 30)) / (1 + np.exp(np.clip(x, -30, 30))),
     )

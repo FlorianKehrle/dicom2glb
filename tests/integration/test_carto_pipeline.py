@@ -82,6 +82,39 @@ class TestCartoEndToEnd:
             assert output.exists()
             assert output.stat().st_size > 0
 
+    def test_animated_all_colorings(self, carto_mesh_dir, tmp_path):
+        """Test that animation works with all coloring modes (highlight ring)."""
+        from med2glb.io.carto_reader import load_carto_study
+        from med2glb.io.carto_mapper import (
+            carto_mesh_to_mesh_data,
+            map_points_to_vertices,
+            interpolate_sparse_values,
+        )
+        from med2glb.glb.carto_builder import build_carto_animated_glb
+
+        study = load_carto_study(carto_mesh_dir)
+        mesh = study.meshes[0]
+        points = study.points.get(mesh.structure_name)
+
+        # Extract LAT values once (used for ring timing regardless of coloring)
+        lat_values = map_points_to_vertices(mesh, points, field="lat")
+        lat_values = interpolate_sparse_values(mesh, lat_values)
+        active_mask = mesh.group_ids != -1000000
+        active_lat = lat_values[active_mask]
+
+        for coloring in ["lat", "bipolar", "unipolar"]:
+            mesh_data = carto_mesh_to_mesh_data(mesh, points, coloring=coloring, subdivide=0)
+            output = tmp_path / f"test_animated_{coloring}.glb"
+            build_carto_animated_glb(
+                mesh_data, active_lat, output,
+                n_frames=5, target_faces=100000,
+            )
+
+            assert output.exists()
+            gltf = pygltflib.GLTF2.load(str(output))
+            assert len(gltf.animations) == 1
+            assert len(gltf.meshes) == 5
+
 
 @pytest.mark.skipif(not CARTO_OLD.exists(), reason="CARTO old data not available")
 class TestRealCartoOld:

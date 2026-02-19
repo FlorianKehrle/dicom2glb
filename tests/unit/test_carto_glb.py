@@ -65,7 +65,7 @@ class TestCartoAnimatedGlb:
         from med2glb.io.carto_mapper import carto_mesh_to_mesh_data, map_points_to_vertices
 
         mesh_data = carto_mesh_to_mesh_data(
-            synthetic_carto_mesh, synthetic_carto_points, coloring="lat"
+            synthetic_carto_mesh, synthetic_carto_points, coloring="lat", subdivide=0
         )
         lat_values = map_points_to_vertices(
             synthetic_carto_mesh, synthetic_carto_points, field="lat"
@@ -94,7 +94,7 @@ class TestCartoAnimatedGlb:
 
         # Should have animation
         assert len(gltf.animations) == 1
-        assert gltf.animations[0].name == "lat_wavefront"
+        assert gltf.animations[0].name == "excitation_ring"
 
         # Each mesh should have COLOR_0
         for mesh in gltf.meshes:

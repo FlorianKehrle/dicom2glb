@@ -211,16 +211,18 @@ def main(
     # Derive output path from input name when not fully specified
     stem = input_path.stem if input_path.is_file() else input_path.name
     parent = input_path.parent if input_path.is_file() else input_path.parent
+    # Default output dir: "glb" subfolder keeps generated files together
+    glb_dir = (input_path if input_path.is_dir() else parent) / "glb"
     if output is None or (not gallery and output.suffix == ""):
         label = _get_data_type_label(input_path, series)
         auto_stem = f"{stem}_{label}" if label else stem
         if output is None:
             if gallery:
-                # Gallery: directory as sibling to input
-                output = parent / auto_stem
+                # Gallery: directory inside glb subfolder
+                output = glb_dir / auto_stem
             else:
-                # Place GLB as sibling to input folder/file
-                output = parent / f"{auto_stem}.{format}"
+                # Place GLB in glb subfolder
+                output = glb_dir / f"{auto_stem}.{format}"
         else:
             # -o points to a directory — put <input_name>_<type>.<format> inside it
             output = output / f"{auto_stem}.{format}"
@@ -537,21 +539,19 @@ def _run_carto_pipeline(
     else:
         selected = list(range(len(study.meshes)))
 
+    # Use output's parent directory for per-mesh files
+    carto_output_dir = output.parent
+    carto_output_dir.mkdir(parents=True, exist_ok=True)
+
     # Convert each selected mesh
     for mesh_idx in selected:
         mesh = study.meshes[mesh_idx]
         points = study.points.get(mesh.structure_name)
 
-        # Determine output path
-        if len(selected) == 1:
-            out_path = output
-        else:
-            out_path = output.parent / f"{mesh.structure_name}_{coloring}.glb"
-
-        # Auto-derive output name if the output still has .glb from DICOM auto-naming
-        if out_path == output and output.suffix == ".glb":
-            # Re-derive with CARTO naming
-            out_path = output.parent / f"{mesh.structure_name}_{coloring}.glb"
+        # Build descriptive filename: <structure>_<coloring>[_animated].glb
+        anim_suffix = "_animated" if (animate and points) else ""
+        glb_name = f"{mesh.structure_name}_{coloring}{anim_suffix}.glb"
+        out_path = carto_output_dir / glb_name
 
         console.print(
             f"\n[bold]Converting: {mesh.structure_name}[/bold] "
@@ -573,9 +573,9 @@ def _run_carto_pipeline(
             )
             progress.remove_task(task)
 
-            if animate and coloring == "lat" and points:
+            if animate and points:
                 # Step 3a: Build animated GLB
-                task = progress.add_task("Building LAT wavefront animation...", total=None)
+                task = progress.add_task("Building excitation ring animation...", total=None)
                 from med2glb.glb.carto_builder import build_carto_animated_glb
                 from med2glb.io.carto_mapper import (
                     map_points_to_vertices,
@@ -649,7 +649,7 @@ def _run_carto_pipeline(
 
         console.print(f"  Vertices:   {len(mesh_data.vertices):,} active / {n_total_verts:,} total")
         console.print(f"  Faces:      {len(mesh_data.faces):,}")
-        console.print(f"  Animated:   {'Yes (LAT wavefront)' if (animate and coloring == 'lat' and points) else 'No'}")
+        console.print(f"  Animated:   {'Yes (excitation ring)' if (animate and points) else 'No'}")
         console.print(f"  Output:     {out_path}")
         console.print(f"  Size:       {file_size:.1f} KB")
         console.print(f"  Time:       {elapsed:.1f}s")
@@ -756,6 +756,9 @@ def _convert_series(
     """Execute the full conversion pipeline for a single series."""
     from med2glb.io.dicom_reader import InputType, load_dicom_directory
     from med2glb.methods.registry import _ensure_methods_loaded, get_method
+
+    # Ensure output directory exists (may be auto-created "glb" subfolder)
+    output.parent.mkdir(parents=True, exist_ok=True)
 
     start_time = time.time()
 
@@ -1007,6 +1010,7 @@ def _run_gallery_mode(
             series_info_map[info.series_uid] = info
 
     output_dir = Path(output) if output.suffix == "" else output.parent
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     total_slices = 0
     series_summaries: list[dict] = []

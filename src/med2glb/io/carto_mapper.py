@@ -185,6 +185,10 @@ def subdivide_carto_mesh(mesh: CartoMesh, iterations: int) -> CartoMesh:
     surface geometry.  Vertex metadata (group_ids, face_group_ids) is
     propagated via nearest-neighbor lookup from the original mesh.
 
+    Inactive faces (group_id == -1000000) are stripped **before**
+    subdivision so that Loop smoothing cannot pull active vertices
+    toward inactive geometry — which would create spike artifacts.
+
     Args:
         mesh: Source CARTO mesh.
         iterations: Number of Loop-subdivision passes (0 = no-op).
@@ -199,9 +203,29 @@ def subdivide_carto_mesh(mesh: CartoMesh, iterations: int) -> CartoMesh:
     import trimesh
     from trimesh.remesh import subdivide_loop
 
+    # --- Strip inactive faces before subdivision ---
+    # Faces with group_id == -1000000 are fully inactive and may bridge
+    # distant regions.  Loop subdivision on these creates spike
+    # artifacts because it smooths vertices across inactive geometry.
+    # Other negative groups (-5, -4, etc.) are transparent fill faces
+    # that maintain mesh topology and must be kept for clean subdivision.
+    active_face_mask = mesh.face_group_ids != _INACTIVE_GROUP_ID
+    clean_faces = mesh.faces[active_face_mask]
+    clean_face_gids = mesh.face_group_ids[active_face_mask]
+
+    # Compact vertices: keep only those referenced by active faces
+    used_verts = np.unique(clean_faces.ravel())
+    old_to_new = np.full(len(mesh.vertices), -1, dtype=np.int32)
+    old_to_new[used_verts] = np.arange(len(used_verts), dtype=np.int32)
+
+    clean_vertices = mesh.vertices[used_verts]
+    clean_normals = mesh.normals[used_verts]
+    clean_group_ids = mesh.group_ids[used_verts]
+    clean_faces = old_to_new[clean_faces]
+
     try:
         new_vertices, new_faces = subdivide_loop(
-            mesh.vertices, mesh.faces, iterations=iterations,
+            clean_vertices, clean_faces, iterations=iterations,
         )
     except (ValueError, AssertionError) as exc:
         # Non-manifold meshes (edges shared by >2 faces) or degenerate
@@ -212,10 +236,11 @@ def subdivide_carto_mesh(mesh: CartoMesh, iterations: int) -> CartoMesh:
         )
         return mesh
 
-    # Propagate group_ids to new vertices via nearest-neighbor from originals
-    tree = KDTree(mesh.vertices)
+    # Propagate group_ids to new vertices via nearest-neighbor from
+    # the cleaned (active-only) originals
+    tree = KDTree(clean_vertices)
     _, nn_idx = tree.query(new_vertices)
-    new_group_ids = mesh.group_ids[nn_idx]
+    new_group_ids = clean_group_ids[nn_idx]
 
     # Derive face_group_ids from vertex 0 of each face
     new_face_group_ids = new_group_ids[new_faces[:, 0]]
@@ -286,6 +311,24 @@ def carto_mesh_to_mesh_data(
     # Drop any faces with -1 (shouldn't happen but be safe)
     valid_faces = np.all(faces >= 0, axis=1)
     faces = faces[valid_faces]
+
+    # Remove spike faces — triangles with any edge > 10x the median edge
+    # length.  These are artifacts from Loop subdivision at mesh boundaries
+    # (e.g. where transparent fill groups meet the real surface).
+    if len(faces) > 0:
+        v0 = vertices[faces[:, 0]]
+        v1 = vertices[faces[:, 1]]
+        v2 = vertices[faces[:, 2]]
+        e01 = np.linalg.norm(v1 - v0, axis=1)
+        e12 = np.linalg.norm(v2 - v1, axis=1)
+        e20 = np.linalg.norm(v0 - v2, axis=1)
+        med_edge = np.median(np.concatenate([e01, e12, e20]))
+        spike_threshold = 10.0 * med_edge
+        keep = (e01 <= spike_threshold) & (e12 <= spike_threshold) & (e20 <= spike_threshold)
+        n_removed = int(np.sum(~keep))
+        if n_removed > 0:
+            logger.debug("Removed %d spike faces from '%s'", n_removed, mesh.structure_name)
+            faces = faces[keep]
 
     # Compute vertex colors
     vertex_colors = None

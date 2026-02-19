@@ -10,8 +10,8 @@ No existing end-to-end CLI tool converts DICOM directly to animated GLB for augm
 
 **Key features:**
 
-- **CARTO 3 EP mapping support** -- auto-detects CARTO export directories; renders LAT, bipolar voltage, and unipolar voltage heatmaps as per-vertex colored GLBs; animated LAT wavefront sweep; Loop subdivision with IDW interpolation for smooth color maps
-- **Animated cardiac output** -- 2D cine clips become animated GLB with per-frame texture planes; 3D temporal volumes use morph targets; CARTO LAT wavefront animation
+- **CARTO 3 EP mapping support** -- auto-detects CARTO export directories; renders LAT, bipolar voltage, and unipolar voltage heatmaps as per-vertex colored GLBs; animated excitation ring overlay (works with all coloring modes); Loop subdivision with IDW interpolation for smooth color maps
+- **Animated cardiac output** -- 2D cine clips become animated GLB with per-frame texture planes; 3D temporal volumes use morph targets; CARTO excitation ring animation
 - **Gallery mode** -- convert every slice to textured quads with three layouts: individual GLBs, lightbox grid, and spatial fan positioned using DICOM metadata
 - **Pluggable conversion methods** -- classical (Gaussian + adaptive threshold), marching cubes, TotalSegmentator (CT), and MedSAM2 (echo/general)
 - **Automatic series detection** -- multi-series DICOM folders are analyzed and classified (3D volume, 2D cine, still image) with per-series conversion recommendations
@@ -44,10 +44,10 @@ pip install -e ".[dev]"
 ## Quick Start
 
 ```bash
-# Convert a DICOM directory — output placed next to input with auto-detected type
-med2glb ./echo_folder/        # → ./echo_folder_Echo_3D_animated.glb
-med2glb ./ct_scan/            # → ./ct_scan_CT_3D.glb
-med2glb image.dcm             # → ./image_Echo_2D.glb
+# Convert a DICOM directory — output placed in glb/ subfolder with auto-detected type
+med2glb ./echo_folder/        # → ./echo_folder/glb/echo_folder_Echo_3D_animated.glb
+med2glb ./ct_scan/            # → ./ct_scan/glb/ct_scan_CT_3D.glb
+med2glb image.dcm             # → ./glb/image_Echo_2D.glb
 
 # Explicit output name
 med2glb ./echo_folder/ -o heart.glb
@@ -76,11 +76,12 @@ med2glb ./data/ --max-size 50 --compress jpeg
 
 ## CARTO 3 Electro-Anatomical Mapping
 
-med2glb auto-detects CARTO 3 export directories (containing `.mesh` files) and converts them to GLB with per-vertex coloring from the mapping data. Supports old CARTO (~2015, v4), v7.1 (v5), and v7.2+ (v6) formats.
+med2glb auto-detects CARTO 3 export directories (containing `.mesh` files) and converts them to GLB with per-vertex coloring from the mapping data. Output files are placed in a `glb/` subfolder inside the input directory by default.  Supports old CARTO (~2015, v4), v7.1 (v5), and v7.2+ (v6) formats.
 
 ```bash
 # Auto-detect and convert with LAT coloring (default)
-med2glb ./Export_Study-1-01_09_2023-20-30-09/
+med2glb ./Export_Study/
+# → ./Export_Study/glb/ReBS_V_SR_11_lat.glb
 
 # Bipolar voltage map (scar mapping)
 med2glb ./Export_Study/ --coloring bipolar
@@ -88,8 +89,12 @@ med2glb ./Export_Study/ --coloring bipolar
 # Unipolar voltage map
 med2glb ./Export_Study/ --coloring unipolar
 
-# Animated LAT wavefront sweep
+# Animated excitation ring (works with any coloring mode)
 med2glb ./Export_Study/ --animate
+# → ./Export_Study/glb/ReBS_V_SR_11_lat_animated.glb
+
+med2glb ./Export_Study/ --coloring bipolar --animate
+# → ./Export_Study/glb/ReBS_V_SR_11_bipolar_animated.glb
 
 # Smoother color maps with more subdivision (default: 1)
 med2glb ./Export_Study/ --subdivide 2
@@ -320,7 +325,7 @@ Arguments:
   INPUT_PATH              Path to DICOM file or directory
 
 Options:
-  -o, --output PATH       Output file path (default: <input>_<modality>_<type>.glb next to input)
+  -o, --output PATH       Output file path (default: <input>/glb/<name>_<type>.glb)
   -m, --method TEXT        Conversion method: classical, marching-cubes, totalseg, medsam2
   -f, --format TEXT        Output format: glb, stl, obj (default: glb)
   --coloring TEXT         CARTO coloring: lat, bipolar, unipolar (default: lat)
