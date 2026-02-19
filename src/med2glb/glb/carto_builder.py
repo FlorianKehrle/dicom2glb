@@ -10,6 +10,7 @@ supported in glTF viewers including HoloLens 2 (MRTK/glTFast).
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -33,6 +34,7 @@ def build_carto_animated_glb(
     n_frames: int = 30,
     loop_duration_s: float = 2.0,
     target_faces: int = 20000,
+    progress: Callable[[str, int, int], None] | None = None,
 ) -> None:
     """Build animated GLB with CARTO-style highlight ring over static colormap.
 
@@ -47,9 +49,15 @@ def build_carto_animated_glb(
         n_frames: Number of animation frames.
         loop_duration_s: Total animation loop time in seconds.
         target_faces: Decimate mesh to this count before creating frames.
+        progress: Optional callback(description, current, total) for progress.
     """
+    def _report(desc: str, current: int = 0, total: int = 0) -> None:
+        if progress:
+            progress(desc, current, total)
+
     # Decimate if mesh is large (animation duplicates mesh N times)
     if len(mesh_data.faces) > target_faces:
+        _report(f"Decimating {len(mesh_data.faces):,} → {target_faces:,} faces...")
         from med2glb.mesh.processing import decimate, compute_normals
 
         orig_colors = mesh_data.vertex_colors
@@ -94,6 +102,7 @@ def build_carto_animated_glb(
     # Generate per-frame vertex colors with highlight ring
     frame_colors = []
     for fi in range(n_frames):
+        _report(f"Generating frame {fi + 1}/{n_frames}...", fi, n_frames)
         t = fi / (n_frames - 1)  # ring position in normalized LAT space
         colors = base_colors.copy()
 
@@ -144,6 +153,7 @@ def build_carto_animated_glb(
     )
 
     # Per-frame: material + COLOR_0 + mesh + node
+    _report("Assembling GLB...", n_frames, n_frames)
     for fi in range(n_frames):
         # Material: white base color, vertex colors drive appearance
         mat_idx = len(gltf.materials)

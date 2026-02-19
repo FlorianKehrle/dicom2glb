@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -54,10 +55,17 @@ def _find_export_dir(path: Path) -> Path:
     return path
 
 
-def load_carto_study(path: Path) -> CartoStudy:
+def load_carto_study(
+    path: Path,
+    progress: Callable[[str, int, int], None] | None = None,
+) -> CartoStudy:
     """Load a complete CARTO study from an export directory.
 
     Discovers and parses all .mesh + _car.txt file pairs.
+
+    Args:
+        path: Path to CARTO export directory.
+        progress: Optional callback(description, current, total) for progress.
     """
     export_dir = _find_export_dir(path)
     mesh_files = sorted(export_dir.glob("*.mesh"))
@@ -67,8 +75,12 @@ def load_carto_study(path: Path) -> CartoStudy:
     meshes: list[CartoMesh] = []
     points: dict[str, list[CartoPoint]] = {}
     version = "unknown"
+    n_files = len(mesh_files)
 
-    for mesh_file in mesh_files:
+    for i, mesh_file in enumerate(mesh_files):
+        if progress:
+            progress(f"Loading {mesh_file.stem}...", i, n_files)
+
         mesh = parse_mesh_file(mesh_file)
         meshes.append(mesh)
 
@@ -80,6 +92,9 @@ def load_carto_study(path: Path) -> CartoStudy:
             points[map_name] = pts
             if version == "unknown":
                 version = ver
+
+    if progress:
+        progress(f"Loaded {n_files} mesh(es)", n_files, n_files)
 
     study_name = export_dir.name
     return CartoStudy(

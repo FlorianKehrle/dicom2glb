@@ -484,11 +484,17 @@ def _run_carto_pipeline(
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
+        BarColumn(bar_width=20),
+        MofNCompleteColumn(),
         console=console,
     ) as progress:
         # Step 1: Load CARTO study
         task = progress.add_task("Loading CARTO data...", total=None)
-        study = load_carto_study(input_path)
+
+        def _load_progress(desc: str, current: int, total: int) -> None:
+            progress.update(task, description=desc, completed=current, total=total)
+
+        study = load_carto_study(input_path, progress=_load_progress)
         progress.update(
             task,
             description=f"Loaded {_carto_version_label(study.version)}: "
@@ -561,10 +567,12 @@ def _run_carto_pipeline(
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
+            BarColumn(bar_width=20),
+            MofNCompleteColumn(),
             console=console,
         ) as progress:
             # Step 2: Map points to vertex colors
-            task = progress.add_task("Mapping points to vertices...", total=None)
+            task = progress.add_task("Subdividing & mapping vertices...", total=None)
             mesh_data = carto_mesh_to_mesh_data(mesh, points, coloring=coloring, subdivide=subdivide)
             progress.update(
                 task,
@@ -576,6 +584,10 @@ def _run_carto_pipeline(
             if animate and points:
                 # Step 3a: Build animated GLB
                 task = progress.add_task("Building excitation ring animation...", total=None)
+
+                def _anim_progress(desc: str, current: int, total: int) -> None:
+                    progress.update(task, description=desc, completed=current, total=total)
+
                 from med2glb.glb.carto_builder import build_carto_animated_glb
                 from med2glb.io.carto_mapper import (
                     map_points_to_vertices,
@@ -587,8 +599,10 @@ def _run_carto_pipeline(
                 # Use the same subdivided mesh for animation LAT extraction
                 anim_mesh = mesh
                 if subdivide > 0:
+                    progress.update(task, description="Subdividing mesh for LAT extraction...")
                     anim_mesh = subdivide_carto_mesh(mesh, iterations=subdivide)
 
+                progress.update(task, description="Mapping LAT values...")
                 if subdivide > 0:
                     lat_values = map_points_to_vertices_idw(anim_mesh, points, field="lat")
                 else:
@@ -601,6 +615,7 @@ def _run_carto_pipeline(
                 build_carto_animated_glb(
                     mesh_data, active_lat, out_path,
                     target_faces=target_faces,
+                    progress=_anim_progress,
                 )
                 progress.remove_task(task)
             else:
@@ -775,6 +790,8 @@ def _convert_series(
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
+        BarColumn(bar_width=20),
+        MofNCompleteColumn(),
         console=console,
     ) as progress:
         # Step 1: Load DICOM
@@ -1040,6 +1057,8 @@ def _run_gallery_mode(
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
+            BarColumn(bar_width=20),
+            MofNCompleteColumn(),
             console=console,
         ) as progress:
             # Step 1: Load all slices
