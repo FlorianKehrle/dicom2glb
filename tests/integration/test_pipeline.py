@@ -67,8 +67,6 @@ def test_single_slice_to_textured_glb(tmp_path):
     # Create a synthetic single DICOM file
     dcm_path = tmp_path / "single.dcm"
     ds = FileDataset(str(dcm_path), Dataset(), preamble=b"\x00" * 128)
-    ds.is_little_endian = True
-    ds.is_implicit_VR = False
     ds.file_meta = pydicom.dataset.FileMetaDataset()
     ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
     ds.file_meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
