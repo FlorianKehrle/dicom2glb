@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import sys
 import time
 from pathlib import Path
@@ -17,6 +18,7 @@ from rich.table import Table
 
 from med2glb import __version__
 from med2glb.core.types import (
+    CartoPoint,
     MaterialConfig,
     MethodParams,
     SeriesInfo,
@@ -397,6 +399,60 @@ def _run_pipeline(
         )
 
 
+_CARTO_VERSION_LABELS: dict[str, str] = {
+    "4.0": "CARTO 3 (~2015)",
+    "5.0": "CARTO 3 v7.1",
+    "6.0": "CARTO 3 v7.2+",
+}
+
+
+def _carto_version_label(version: str) -> str:
+    """Map file-format version to a human-readable CARTO system label."""
+    label = _CARTO_VERSION_LABELS.get(version)
+    if label:
+        return f"{label} (file format v{version})"
+    return f"CARTO (file format v{version})"
+
+
+def _carto_point_stats(
+    points: list[CartoPoint],
+) -> dict[str, str]:
+    """Compute summary statistics for a set of CARTO measurement points."""
+    stats: dict[str, str] = {}
+    if not points:
+        stats["Points"] = "0"
+        return stats
+
+    total = len(points)
+    lats = np.array([p.lat for p in points], dtype=np.float64)
+    bipolars = np.array([p.bipolar_voltage for p in points], dtype=np.float64)
+    unipolars = np.array([p.unipolar_voltage for p in points], dtype=np.float64)
+
+    valid_lat = lats[~np.isnan(lats)]
+    valid_bip = bipolars[~np.isnan(bipolars)]
+    valid_uni = unipolars[~np.isnan(unipolars)]
+
+    stats["Points"] = f"{total:,} ({len(valid_lat):,} with valid LAT)"
+
+    if len(valid_lat) > 0:
+        stats["LAT range"] = (
+            f"{np.min(valid_lat):.0f} to {np.max(valid_lat):.0f} ms "
+            f"(mean {np.mean(valid_lat):.0f} ms)"
+        )
+    if len(valid_bip) > 0:
+        stats["Bipolar V"] = (
+            f"{np.min(valid_bip):.2f} – {np.max(valid_bip):.2f} mV "
+            f"(mean {np.mean(valid_bip):.2f} mV)"
+        )
+    if len(valid_uni) > 0:
+        stats["Unipolar V"] = (
+            f"{np.min(valid_uni):.2f} – {np.max(valid_uni):.2f} mV "
+            f"(mean {np.mean(valid_uni):.2f} mV)"
+        )
+
+    return stats
+
+
 def _run_carto_pipeline(
     input_path: Path,
     output: Path,
@@ -424,7 +480,7 @@ def _run_carto_pipeline(
         study = load_carto_study(input_path)
         progress.update(
             task,
-            description=f"Loaded CARTO v{study.version}: "
+            description=f"Loaded {_carto_version_label(study.version)}: "
             f"{len(study.meshes)} mesh(es), "
             f"{sum(len(p) for p in study.points.values())} points",
         )
@@ -538,14 +594,41 @@ def _run_carto_pipeline(
         # Print summary
         file_size = out_path.stat().st_size / 1024
         elapsed = time.time() - start_time
+        n_total_verts = len(mesh.vertices)
+        n_active_verts = int(np.sum(mesh.group_ids != -1000000))
+
+        # Colormap clamp range info
+        clamp_info = ""
+        if coloring == "bipolar":
+            clamp_info = "0.05 – 1.5 mV"
+        elif coloring == "unipolar":
+            clamp_info = "3.0 – 10.0 mV"
+        elif coloring == "lat" and points:
+            valid_lats = [p.lat for p in points if not math.isnan(p.lat)]
+            if valid_lats:
+                clamp_info = f"{min(valid_lats):.0f} – {max(valid_lats):.0f} ms (auto)"
+
         console.print(f"\n[green]CARTO conversion complete![/green]")
-        console.print(f"  Input:    CARTO v{study.version} ({mesh.structure_name})")
-        console.print(f"  Coloring: {coloring}")
-        console.print(f"  Output:   {out_path}")
-        console.print(f"  Vertices: {len(mesh_data.vertices):,}")
-        console.print(f"  Faces:    {len(mesh_data.faces):,}")
-        console.print(f"  Size:     {file_size:.1f} KB")
-        console.print(f"  Time:     {elapsed:.1f}s")
+        console.print(f"  System:     {_carto_version_label(study.version)}")
+        if study.study_name:
+            console.print(f"  Study:      {study.study_name}")
+        console.print(f"  Map:        {mesh.structure_name}")
+        console.print(f"  Coloring:   {coloring}")
+        if clamp_info:
+            console.print(f"  Color range: {clamp_info}")
+
+        # Point statistics
+        mesh_points = points or []
+        point_stats = _carto_point_stats(mesh_points)
+        for label, value in point_stats.items():
+            console.print(f"  {label + ':':14s}{value}")
+
+        console.print(f"  Vertices:   {len(mesh_data.vertices):,} active / {n_total_verts:,} total")
+        console.print(f"  Faces:      {len(mesh_data.faces):,}")
+        console.print(f"  Animated:   {'Yes (LAT wavefront)' if (animate and coloring == 'lat' and points) else 'No'}")
+        console.print(f"  Output:     {out_path}")
+        console.print(f"  Size:       {file_size:.1f} KB")
+        console.print(f"  Time:       {elapsed:.1f}s")
 
 
 def _print_series_table(series_list: list[SeriesInfo], input_path: Path) -> None:
